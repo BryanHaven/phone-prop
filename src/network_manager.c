@@ -30,6 +30,8 @@
 
 static const char *TAG = "net_mgr";
 
+static char s_ip_str[16] = "\xe2\x80\x94"; // em dash — shown when no IP assigned
+
 // Event group bits
 #define ETH_CONNECTED_BIT    BIT0
 #define ETH_GOT_IP_BIT       BIT1
@@ -72,6 +74,7 @@ static void eth_event_handler(void *arg, esp_event_base_t base,
         case ETHERNET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Ethernet link down");
             xEventGroupClearBits(net_events, ETH_CONNECTED_BIT | ETH_GOT_IP_BIT);
+            strncpy(s_ip_str, "\xe2\x80\x94", sizeof(s_ip_str));
             // Fall back to WiFi if configured
             if (xEventGroupGetBits(net_events) & WIFI_GOT_IP_BIT) {
                 report_status(NET_WIFI);
@@ -90,14 +93,16 @@ static void ip_event_handler(void *arg, esp_event_base_t base,
     ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
 
     if (event_id == IP_EVENT_ETH_GOT_IP) {
-        ESP_LOGI(TAG, "Ethernet got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        snprintf(s_ip_str, sizeof(s_ip_str), IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Ethernet got IP: %s", s_ip_str);
         xEventGroupSetBits(net_events, ETH_GOT_IP_BIT | NET_CONNECTED_BIT);
         report_status(NET_ETHERNET);
 
     } else if (event_id == IP_EVENT_STA_GOT_IP) {
+        snprintf(s_ip_str, sizeof(s_ip_str), IPSTR, IP2STR(&event->ip_info.ip));
         // Only use WiFi if Ethernet isn't up
         if (!(xEventGroupGetBits(net_events) & ETH_GOT_IP_BIT)) {
-            ESP_LOGI(TAG, "WiFi got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+            ESP_LOGI(TAG, "WiFi got IP: %s", s_ip_str);
             xEventGroupSetBits(net_events, WIFI_GOT_IP_BIT | NET_CONNECTED_BIT);
             report_status(NET_WIFI);
         } else {
@@ -198,6 +203,12 @@ static esp_err_t wifi_init(const char *ssid, const char *password) {
     ESP_ERROR_CHECK(esp_wifi_connect());
 
     return ESP_OK;
+}
+
+// ─── IP String ──────────────────────────────────────────────────────────────
+void network_get_ip_str(char *buf, size_t len) {
+    strncpy(buf, s_ip_str, len - 1);
+    buf[len - 1] = '\0';
 }
 
 // ─── Public Init ────────────────────────────────────────────────────────────

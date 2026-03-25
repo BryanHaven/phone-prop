@@ -61,6 +61,12 @@ network_status_t network_get_status(void);
 void             network_set_status_callback(network_status_cb_t cb);
 
 /**
+ * Copy the current IP address string into buf (e.g. "192.168.1.42").
+ * Returns "—" if no IP is assigned.
+ */
+void             network_get_ip_str(char *buf, size_t len);
+
+/**
  * Start WiFi in SoftAP mode for initial provisioning.
  * Call AFTER network_manager_init() (which sets up the event loop and netif).
  * AP is open (no password) — provisioning page is LAN-only anyway.

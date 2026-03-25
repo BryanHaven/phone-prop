@@ -26,3 +26,10 @@
 esp_err_t web_ui_start(device_config_t *cfg, dial_ruleset_t *rules);
 
 void web_ui_stop(void);
+
+/**
+ * Notify the WebUI of MQTT connection state changes.
+ * Call from the MQTT event handler in phone_prop_main.c.
+ * Used by GET /api/status to report live MQTT status.
+ */
+void web_ui_notify_mqtt(bool connected);

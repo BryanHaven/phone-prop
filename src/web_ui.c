@@ -32,15 +32,18 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "device_config.h"
 #include "dial_rules.h"
+#include "network_manager.h"
 #include "web_ui.h"
 
 static const char *TAG     = "web_ui";
 static httpd_handle_t s_server = NULL;
-static device_config_t  *s_cfg   = NULL;
-static dial_ruleset_t   *s_rules = NULL;
+static device_config_t  *s_cfg         = NULL;
+static dial_ruleset_t   *s_rules       = NULL;
+static bool              s_mqtt_connected = false;
 
 #define AUDIO_DIR "/sdcard/audio/messages"
 
@@ -91,6 +94,7 @@ static const char HTML[] =
     "<button class='tab on' onclick='showTab(0)'>Config</button>"
     "<button class='tab'    onclick='showTab(1)'>Dial Rules</button>"
     "<button class='tab'    onclick='showTab(2)'>Audio Files</button>"
+    "<button class='tab'    onclick='showTab(3)'>Status</button>"
     "</div>"
 
     // ── Config tab ───────────────────────────────────────────────────────────
@@ -193,11 +197,19 @@ static const char HTML[] =
     "</div>"
     "</div>"
 
+    // ── Status tab ───────────────────────────────────────────────────────────
+    "<div id='t3' style='display:none'>"
+    "<div class='s'><h2>Device Status</h2>"
+    "<div id='sdata'><small>Loading\u2026</small></div>"
+    "</div>"
+    "</div>"
+
     // ── JavaScript ───────────────────────────────────────────────────────────
     "<script>"
 
     // Tab switching
-    "const TABS=['t0','t1','t2'];"
+    "const TABS=['t0','t1','t2','t3'];"
+    "let s_timer=null;"
     "function showTab(n){"
       "TABS.forEach((id,i)=>{"
         "document.getElementById(id).style.display=i===n?'block':'none';"
@@ -205,8 +217,10 @@ static const char HTML[] =
       "document.querySelectorAll('.tab').forEach((b,i)=>{"
         "b.classList.toggle('on',i===n);"
       "});"
+      "if(s_timer){clearInterval(s_timer);s_timer=null;}"
       "if(n===1)loadRules();"
       "if(n===2)loadAudio();"
+      "if(n===3){loadStatus();s_timer=setInterval(loadStatus,5000);}"
     "}"
 
     // ── Config tab JS ────────────────────────────────────────────────────────
@@ -362,6 +376,35 @@ static const char HTML[] =
       "m.style.display='block';"
     "}"
 
+    // ── Status tab JS ────────────────────────────────────────────────────────
+    "async function loadStatus(){"
+      "const d=document.getElementById('sdata');"
+      "try{"
+        "const r=await fetch('/api/status');"
+        "const s=await r.json();"
+        "const upS=s.uptime_s|0;"
+        "const upStr=Math.floor(upS/3600)+'h '+"
+          "Math.floor(upS%3600/60)+'m '+upS%60+'s';"
+        "const rows=["
+          "['Device ID',s.device_id],"
+          "['Firmware',s.firmware],"
+          "['Network',s.network],"
+          "['IP Address',s.ip],"
+          "['MQTT',s.mqtt_connected?'Connected':'Disconnected'],"
+          "['Uptime',upStr],"
+          "['Free Heap',(s.free_heap/1024).toFixed(1)+' KB'],"
+        "];"
+        "const tbl=document.createElement('table');"
+        "rows.forEach(([k,v])=>{"
+          "const tr=tbl.insertRow();"
+          "const c1=tr.insertCell();"
+          "c1.textContent=k;c1.style.color='#8ecae6';c1.style.width='40%';"
+          "tr.insertCell().textContent=v;"
+        "});"
+        "d.innerHTML='';d.appendChild(tbl);"
+      "}catch(ex){d.textContent='Error: '+ex.message;}"
+    "}"
+
     // Init: load config on page open
     "loadCfg();"
     "</script></body></html>";
@@ -393,6 +436,40 @@ static bool get_query_name(httpd_req_t *req, char *dest, size_t dest_len) {
 static bool sd_is_mounted(void) {
     struct stat st;
     return stat("/sdcard", &st) == 0;
+}
+
+// ─── MQTT state notification ─────────────────────────────────────────────────
+
+void web_ui_notify_mqtt(bool connected) {
+    s_mqtt_connected = connected;
+}
+
+// ─── GET /api/status ─────────────────────────────────────────────────────────
+
+static esp_err_t handler_get_status(httpd_req_t *req) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "device_id", s_cfg ? s_cfg->device_id : "");
+    cJSON_AddStringToObject(root, "firmware",  __DATE__ " " __TIME__);
+
+    network_status_t ns = network_get_status();
+    cJSON_AddStringToObject(root, "network",
+        ns == NET_ETHERNET ? "Ethernet" :
+        ns == NET_WIFI     ? "WiFi"     : "Disconnected");
+
+    char ip[20];
+    network_get_ip_str(ip, sizeof(ip));
+    cJSON_AddStringToObject(root, "ip", ip);
+
+    cJSON_AddBoolToObject  (root, "mqtt_connected", s_mqtt_connected);
+    cJSON_AddNumberToObject(root, "uptime_s",  (double)(esp_timer_get_time() / 1000000LL));
+    cJSON_AddNumberToObject(root, "free_heap", (double)esp_get_free_heap_size());
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, strlen(json));
+    free(json);
+    return ESP_OK;
 }
 
 // ─── GET / ───────────────────────────────────────────────────────────────────
@@ -703,7 +780,7 @@ esp_err_t web_ui_start(device_config_t *cfg, dial_ruleset_t *rules) {
     s_rules = rules;
 
     httpd_config_t config     = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers   = 12;
+    config.max_uri_handlers   = 14;
     config.stack_size         = 12288;
 
     if (httpd_start(&s_server, &config) != ESP_OK) {
@@ -719,8 +796,9 @@ esp_err_t web_ui_start(device_config_t *cfg, dial_ruleset_t *rules) {
         { .uri="/api/rules", .method=HTTP_POST,   .handler=handler_post_rules   },
         { .uri="/api/audio", .method=HTTP_GET,    .handler=handler_get_audio    },
         { .uri="/api/audio", .method=HTTP_POST,   .handler=handler_post_audio   },
-        { .uri="/api/audio", .method=HTTP_DELETE, .handler=handler_delete_audio },
-        { .uri="/api/reboot",.method=HTTP_POST,   .handler=handler_post_reboot  },
+        { .uri="/api/audio",  .method=HTTP_DELETE, .handler=handler_delete_audio  },
+        { .uri="/api/reboot", .method=HTTP_POST,   .handler=handler_post_reboot  },
+        { .uri="/api/status", .method=HTTP_GET,    .handler=handler_get_status   },
     };
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++)
         httpd_register_uri_handler(s_server, &routes[i]);

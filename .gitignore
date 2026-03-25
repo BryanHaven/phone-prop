@@ -7,5 +7,8 @@
 # ESP-IDF generated sdkconfig (overrides in sdkconfig.defaults / sdkconfig.<env>)
 sdkconfig
 
+# IDF Component Manager — downloaded components (reproducible via idf_component.yml)
+managed_components/
+
 # Claude Code session data
 .claude/

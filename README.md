@@ -23,11 +23,14 @@ daughterboard. Ethernet (W5500) primary, WiFi fallback. PoE or barrel jack power
 - WiFi STA fallback with automatic switchover
 - SoftAP provisioning mode on first boot (`PhoneProp-{device_id}`, open, `192.168.4.1`)
 - NVS-backed per-unit config (MQTT broker, base topic, device ID, network mode, phone mode, etc.)
-- Three-tab WebUI at `http://<ip>/`:
+- Four-tab WebUI at `http://<ip>/`:
   - **Config** — all device settings, save to NVS, reboot
   - **Dial Rules** — map dialed numbers to actions (play file, tones, ignore) + optional MQTT event; saved to SPIFFS
   - **Audio Files** — upload/delete WAV files to SD card (active in Phase 1B)
+  - **Status** — live device status (network, IP, MQTT, uptime, free heap); auto-refreshes every 5 s
 - MQTT client with auto-reconnect
+- mDNS — device reachable as `{device_id}.local` on all interfaces
+- WS2812B status LED state machine (red blink = no network, amber blink = no MQTT, green = ready)
 - Phone prop state machine running (IDLE state)
 - ProSLIC SPI bus init + echo self-test (no daughterboard yet)
 - I2S PCM bus init (Phase 2 BCLK tuning pending)
@@ -81,9 +84,13 @@ daughterboard. Ethernet (W5500) primary, WiFi fallback. PoE or barrel jack power
 ### Environments
 
 ```bash
-# Development — Waveshare ESP32-S3-ETH dev board
+# Development — Waveshare ESP32-S3-ETH dev board (Phase 1A/1B)
 pio run -e waveshare-s3-eth
 pio run -e waveshare-s3-eth --target upload --upload-port COMx
+
+# Development — Waveshare, ProSLIC only / WiFi (Phase 2)
+pio run -e waveshare-proslic-only
+pio run -e waveshare-proslic-only --target upload --upload-port COMx
 
 # Production — Custom PCB (ESP32-S3-WROOM-1-N16)
 pio run -e phone-prop
@@ -92,6 +99,10 @@ pio run -e phone-prop --target upload --upload-port COMx
 # Serial monitor
 pio device monitor --port COMx --baud 115200
 ```
+
+> **Note:** On first build, PlatformIO runs the IDF Component Manager to download
+> `espressif/led_strip` and `espressif/mdns` from components.espressif.com.
+> This requires internet access once; components are cached in `managed_components/`.
 
 ### sdkconfig overrides
 
@@ -110,8 +121,9 @@ On first boot (no WiFi credentials in NVS), the device starts a SoftAP:
 3. Fill in WiFi SSID/password, MQTT broker URL, base topic, device ID
 4. Click **Save Configuration**, then **Reboot**
 
-On subsequent boots the AP does not start. The WebUI remains accessible at the
-device's assigned IP over WiFi or Ethernet.
+On subsequent boots the AP does not start. The WebUI remains accessible at:
+- **`http://{device_id}.local/`** — mDNS hostname (works on most networks)
+- **`http://<assigned-ip>/`** — direct IP (always works)
 
 ---
 
@@ -251,11 +263,7 @@ No firmware changes needed — GPIO assignments are entirely in `platformio.ini`
 
 ## Backlog
 
-- [ ] mDNS support — allow broker URL as `mqtt://hostname.local`
 - [ ] OTA firmware update via WebUI
-- [ ] WebUI status page (network state, MQTT connection, uptime)
-- [ ] WS2812B LED state machine integration (colours per phone state)
-- [ ] Phase 2 PlatformIO environment (`waveshare-proslic-only`)
 
 ---
 

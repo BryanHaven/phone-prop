@@ -27,6 +27,8 @@
 #include "proslic_hal.h"
 #include "dial_rules.h"
 #include "web_ui.h"
+#include "led_status.h"
+#include "mdns.h"
 
 // SPI host aliases — ESP32-S3 doesn't define the legacy HSPI/VSPI names.
 // Per CLAUDE.md: VSPI (SPI2) = ProSLIC bus, HSPI (SPI3) = W5500 + SD bus.
@@ -158,6 +160,7 @@ static void on_network_status(network_status_t status) {
         status == NET_ETHERNET ? "ethernet" :
         status == NET_WIFI     ? "wifi"     : "disconnected";
     mqtt_publish(topic_network, status_str);
+    led_status_set_network(status);
 }
 
 // ─── State Transition ──────────────────────────────────────────────────────
@@ -438,6 +441,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT connected");
+            web_ui_notify_mqtt(true);
+            led_status_set_mqtt(true);
             esp_mqtt_client_subscribe(mqtt_client, topic_cmd_wildcard, 1);
             // Announce current state on reconnect
             mqtt_publish(topic_status, "on_hook");
@@ -448,6 +453,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
 
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "MQTT disconnected — will auto-reconnect");
+            web_ui_notify_mqtt(false);
+            led_status_set_mqtt(false);
             break;
 
         case MQTT_EVENT_DATA:
@@ -584,6 +591,9 @@ void app_main(void) {
     ESP_LOGI(TAG, "MQTT base topic: %s | broker: %s",
              g_cfg.mqtt_base_topic, g_cfg.mqtt_broker);
 
+    // ── WS2812B status LED (starts red-blink; transitions via callbacks below)
+    led_status_init();
+
     // ── GPIO ISR service — required by W5500 INT pin and any other GPIO interrupts.
     //    Must be installed before network_manager_init() registers the W5500 ISR.
     gpio_install_isr_service(0);
@@ -616,6 +626,13 @@ void app_main(void) {
         snprintf(ap_ssid, sizeof(ap_ssid), "PhoneProp-%s", g_cfg.device_id);
         network_start_ap(ap_ssid);
     }
+
+    // ── mDNS — advertise as {device_id}.local on all active interfaces
+    mdns_init();
+    mdns_hostname_set(g_cfg.device_id);
+    mdns_instance_name_set("Phone Prop");
+    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+    ESP_LOGI(TAG, "mDNS hostname: %s.local", g_cfg.device_id);
 
     // ── WebUI: provisioning page always available (AP IP, STA IP, or Ethernet IP)
     web_ui_start(&g_cfg, &g_rules);
