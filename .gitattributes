@@ -1,0 +1,6 @@
+# Normalize line endings — LF in repo, checkout as-is on all platforms
+* text=auto eol=lf
+
+# Binary files — no conversion
+*.bin binary
+*.csv text eol=lf

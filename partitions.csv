@@ -1,0 +1,18 @@
+# ESP32-S3 Phone Prop — Partition Table
+# Flash size: 16MB (ESP32-S3-WROOM-1-N16)
+# 
+# Layout:
+#   nvs       - WiFi credentials, MQTT config, device settings
+#   otadata   - OTA slot tracking
+#   app0      - Running firmware (ota_0)
+#   app1      - OTA staging slot (ota_1)
+#   spiffs    - WebUI assets (gzipped HTML/CSS/JS), kit config (JSON)
+#
+# Audio files are on SD card — NOT in flash partitions
+#
+# Name,   Type, SubType,  Offset,    Size,   Flags
+nvs,      data, nvs,      0x9000,    0x5000,
+otadata,  data, ota,      0xe000,    0x2000,
+app0,     app,  ota_0,    0x10000,   0x180000,
+app1,     app,  ota_1,    0x190000,  0x180000,
+spiffs,   data, spiffs,   0x310000,  0xCF0000,

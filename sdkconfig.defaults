@@ -1,0 +1,13 @@
+# sdkconfig.defaults
+# Project-wide Kconfig overrides for phone-prop controller.
+# Applied when ESP-IDF generates (or regenerates) sdkconfig.
+# Run "pio run --target clean" then "pio run" to pick up changes here.
+
+# ── Flash size — both boards use 16MB flash ────────────────────────────────
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# ── Ethernet / W5500 SPI Ethernet ──────────────────────────────────────────
+CONFIG_ETH_ENABLED=y
+CONFIG_ETH_USE_SPI_ETHERNET=y
+CONFIG_ETH_SPI_ETHERNET_W5500=y

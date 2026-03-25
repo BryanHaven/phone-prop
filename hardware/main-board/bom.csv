@@ -1,0 +1,49 @@
+Reference,Qty,Value,Description,Package,LCSC Part,Notes
+U1,1,ESP32-S3-WROOM-1-N16,ESP32-S3 Module 16MB Flash WiFi BT,Module,C2913202,16MB flash; integrated antenna; N16 variant
+U2,1,W5500,Ethernet Controller SPI Hardwired TCP/IP,QFN-48,C32961,WIZnet; use with RJ45 w/ integrated magnetics
+U3,1,AG9800MT,PoE PD Controller 802.3af,SOP-16,search AG9800MT,DNP BY DEFAULT — populate only for PoE installs
+U4,1,CH340N,USB to UART bridge,SOP-8,C506813,Programming and debug via USB-C
+U5,1,AMS1117-3.3,LDO Regulator 3.3V 800mA,SOT-223,C6186,Main 3.3V digital supply from 12V
+U6,1,LP2985-33DBVR,LDO Regulator 3.3V 150mA low-noise,SOT-23-5,C99075,Clean VDDA — may be DNP on main board (daughterboard has its own)
+D_LED,1,WS2812B,RGB LED NeoPixel,5050,C114586,Status LED; GPIO21 via 330R
+J_ETH,1,HR911105A,RJ45 with integrated magnetics + LEDs,THT,C12074,Ethernet jack; integrated 1:1 transformers
+J_USB,1,USB-C 2.0 receptacle,USB-C connector for programming,SMD,C2765186,Programming/debug only; add 5.1k CC resistors
+J_PWR,1,PJ-002A,DC barrel jack 2.1mm 12V,THT,C16214,Fallback power when no PoE switch
+J3,1,2x10 2.54mm pin header male,Male header to SLIC daughterboard,THT,search 2x10 male header,Pin header — male on main board
+J_SD,1,microSD push-push slot,microSD card connector SPI mode,SMD,C91145,Audio file storage
+SW_RESET,1,Tactile switch 3x4mm,Reset button ESP32 EN,SMD,C318884,
+SW_BOOT,1,Tactile switch 3x4mm,Boot/flash mode button GPIO0,SMD,C318884,
+Y1,1,25MHz crystal,25 MHz for W5500,SMD HC-49S,search 25MHz SMD crystal,W5500 requires 25MHz; 22pF load caps
+C_X1,1,22pF 0402,Crystal load cap,0402,C1653,W5500 crystal
+C_X2,1,22pF 0402,Crystal load cap,0402,C1653,W5500 crystal
+R_BIAS,1,12.4k 1% 0402,W5500 RBIAS resistor,0402,search 12.4k 1%,Must be 1% tolerance; sets W5500 reference current
+R_LED,1,330R 0402,WS2812B series resistor,0402,C25744,
+R_SLIC_INT,1,4.7k 0402,SLIC INT pullup,0402,C25900,
+R_SLIC_RST,1,10k 0402,SLIC RST pullup,0402,C25804,
+R_W5500_INT,1,4.7k 0402,W5500 INT pullup,0402,C25900,
+R_W5500_RST,1,10k 0402,W5500 RST pullup,0402,C25804,
+R_CC1,1,5.1k 0402,USB-C CC1 pulldown,0402,C23186,Required for USB-C to negotiate correctly
+R_CC2,1,5.1k 0402,USB-C CC2 pulldown,0402,C23186,Required for USB-C
+R_USB_DP,1,27R 0402,USB D+ series resistor,0402,C25741,CH340N UD+ to USB D+
+R_USB_DM,1,27R 0402,USB D– series resistor,0402,C25741,CH340N UD– to USB D–
+R_BOOT,1,10k 0402,GPIO0 pullup,0402,C25804,
+SD_PU1,1,10k 0402,SD CS pullup,0402,C25804,
+SD_PU2,1,10k 0402,SD MOSI pullup,0402,C25804,
+SD_PU3,1,10k 0402,SD MISO pullup,0402,C25804,
+D_OR_A,1,SS34 Schottky SMA,PoE power diode-OR,SMA,C8678,PoE output to 12V_RAIL
+D_OR_B,1,SS34 Schottky SMA,Barrel jack power diode-OR,SMA,C8678,Barrel jack to 12V_RAIL
+F1,1,RXEF050,Polyfuse 500mA self-reset,1812,search RXEF050,On barrel jack input
+C_12V_A,1,100uF 25V,Electrolytic 12V bulk,SMD 6.3mm,search 100uF 25V SMD,12V rail bulk capacitor
+C_12V_B,1,100nF 0402,Ceramic bypass 12V,0402,C14663,
+C_3V3_A,1,100uF 16V,Electrolytic 3V3 bulk,SMD 6.3mm,search 100uF 16V SMD,AMS1117 output bulk
+C_3V3_B,1,100nF 0402,Ceramic bypass 3V3,0402,C14663,
+C_W5500_VCC1,1,100nF 0402,W5500 VCC bypass,0402,C14663,Place <0.5mm from W5500 pin 6
+C_W5500_VCC2,1,100nF 0402,W5500 VCC bypass,0402,C14663,Pin 28
+C_W5500_VCC3,1,10uF 0805,W5500 VCC bulk,0805,C15850,
+C_CH340,1,100nF 0402,CH340N V3 bypass,0402,C14663,Pin 4 to GND
+TP1,1,Test point 1mm SMD,12V rail,SMD,,
+TP2,1,Test point 1mm SMD,3V3,SMD,,
+TP3,1,Test point 1mm SMD,GND,SMD,,
+TP4,1,Test point 1mm SMD,W5500_INT,SMD,,
+TP5,1,Test point 1mm SMD,HSPI_CLK,SMD,,
+TP6,1,Test point 1mm SMD,UART_TX,SMD,,

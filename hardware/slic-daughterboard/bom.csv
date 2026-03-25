@@ -1,0 +1,38 @@
+Reference,Qty,Value,Description,Package,LCSC Part,Manufacturer PN,Notes
+U2,1,Si32177-C-FM1R,ProSLIC FXS SLIC -140V PCM/SPI,LGA-42 5x7mm,C2676781,SI32177-C-FM1R,Core SLIC IC — verify footprint before ordering
+U3,1,AMS1117-3.3,LDO Regulator 3.3V 800mA,SOT-223,C6186,AMS1117-3.3,Digital supply — DNP if main board supplies 3V3 via J3
+U4,1,LP2985-33DBVR,LDO Regulator 3.3V 150mA low-noise,SOT-23-5,C99075,LP2985-33DBVR,Clean VDDA analog supply for Si32177
+Q1,1,AO3400,N-ch MOSFET 30V 5.7A,SOT-23,C700953,AO3400,DC-DC boost switch — Vds must be > 150V — VERIFY before ordering (AO3400 is 30V rated — SUBSTITUTE NEEDED — see note)
+Q2,1,AO3401,P-ch MOSFET -30V 4A,SOT-23,C15127,AO3401,Reverse polarity protection on 12V input
+D1,1,SS2200,Schottky 200V 2A,SMA,search SS2200,SS2200-E3/52T,CRITICAL: Must be rated >150V for VBAT boost rail — verify before ordering
+D2A,1,SMBJ100CA,TVS Bidirectional 100V,SMB,search SMBJ100CA,SMBJ100CA,TIP line surge protection
+D2B,1,SMBJ100CA,TVS Bidirectional 100V,SMB,search SMBJ100CA,SMBJ100CA,RING line surge protection
+L1,1,100uH 500mA,Power Inductor DCR<1ohm Isat>600mA,CDRH8D43 or SRR8028,search 100uH power inductor,CDRH8D43-101,Boost converter — verify Isat before ordering
+F1,1,RXEF050,Polyfuse 500mA 16V self-reset,1812,search RXEF050,RXEF050,Input fuse — self-resetting
+R_Q2G,1,10k,Resistor 0402,0402,C25804,Generic,Q2 gate resistor
+R_Q2GND,1,100k,Resistor 0402,0402,C25803,Generic,Q2 gate-to-GND bleed
+R_INT,1,4.7k,Resistor 0402,0402,C25900,Generic,INT pullup to 3V3
+R_RST,1,10k,Resistor 0402,0402,C25804,Generic,RST pullup to 3V3
+R_GATE,1,10,Resistor 10 ohm 0402,0402,C25744,Generic,Q1 gate damping resistor
+R4A,1,RXEF010,PTC Thermistor 200mA,1206,search RXEF010,RXEF010,TIP line overcurrent protection
+R4B,1,RXEF010,PTC Thermistor 200mA,1206,search RXEF010,RXEF010,RING line overcurrent protection
+C_U3A,1,100uF 25V,Electrolytic cap,SMD 6.3mm,search 100uF 25V SMD,Generic,U3 output bulk cap
+C_U3B,1,100nF,Ceramic cap X5R 0402 10V,0402,C14663,Generic,U3 output bypass
+C_U4A,1,10uF,Ceramic cap X5R 0805 10V,0805,C15850,Generic,U4 output bulk
+C_U4B,1,100nF,Ceramic cap X5R 0402 10V,0402,C14663,Generic,U4 output bypass
+C_VDDD,1,100nF,Ceramic cap 0402,0402,C14663,Generic,Si32177 VDDD bypass — place <0.5mm from pin 40
+C_VDDA,1,100nF,Ceramic cap 0402,0402,C14663,Generic,Si32177 VDDA bypass — place <0.5mm from pin 41
+C_VDDHV,1,100nF,Ceramic cap 0402,0402,C14663,Generic,Si32177 VDDHV bypass — place <0.5mm from pin 42
+C_VDDA2,1,100nF,Ceramic cap 0402,0402,C14663,Generic,Additional VDDA bypass (place on back side if needed)
+C7,1,100uF 200V,Electrolytic radial VBAT bulk,Radial 8x12mm,search 100uF 200V radial,Generic,INSTALLED INVERTED — negative lead to VBAT (negative rail)
+J1,1,PJ-002A,Barrel jack 2.1mm 12V DC,THT,C16214,PJ-002A,Right-angle — verify footprint clearance
+J2,1,6P4C RJ11,RJ11 telephone connector horizontal,THT,C381104,TM11R-88 or equiv,TIP=pin4 RING=pin3 per EIA-561
+J3,1,2x10 2.54mm,Pin header female 2x10 2.54mm,THT,search 2x10 female header,Generic,Interface to main board — female socket on daughterboard
+TP1,1,Test point 1mm,SMD test point pad TIP,SMD 1mm,—,Keystone 5015 or pad,TIP line — label on silkscreen
+TP2,1,Test point 1mm,SMD test point pad RING,SMD 1mm,—,—,RING line
+TP3,1,Test point 1mm,SMD test point pad VBAT,SMD 1mm,—,—,LABEL HV on silkscreen
+TP4,1,Test point 1mm,SMD test point pad 3V3,SMD 1mm,—,—,3V3 digital
+TP5,1,Test point 1mm,SMD test point pad VDDA,SMD 1mm,—,—,Analog supply
+TP6,1,Test point 1mm,SMD test point pad GND,SMD 1mm,—,—,Ground
+TP7,1,Test point 1mm,SMD test point pad SW_NODE,SMD 1mm,—,—,Boost switching node — for scope
+TP8,1,Test point 1mm,SMD test point pad DCDRV,SMD 1mm,—,—,Gate drive signal
