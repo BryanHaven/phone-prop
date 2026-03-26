@@ -102,16 +102,30 @@ Phase 2 with Ethernet initialization disabled and ProSLIC on remapped GPIOs.
 Build: `pio run -e waveshare-s3-eth`
 No additional hardware needed beyond the Waveshare board and a Cat5e cable.
 
+**Status: Substantially complete. OTA and Ethernet-primary path still to verify.**
+
 Checklist:
-  [ ] W5500 Ethernet initializes, gets DHCP address
+  [✅] W5500 Ethernet driver initializes (Mar 2026 — driver starts, netif attached)
+  [ ] W5500 Ethernet gets DHCP address (cable test pending)
   [ ] MQTT connects over Ethernet to broker
-  [ ] MQTT publishes and subscribes correctly
-  [ ] WiFi fallback connects when Ethernet cable removed
-  [ ] MQTT continues over WiFi during failover
-  [ ] WS2812B LED color changes with state machine transitions (GPIO21)
-  [ ] NVS config load/save: phone_mode, MQTT broker, base topic, device ID
-  [ ] WebUI serves from LittleFS over WiFi (provisioning page)
+  [✅] WiFi connects and gets DHCP (Mar 2026 — E2W, 192.168.1.100)
+  [✅] MQTT connects over WiFi (Mar 2026 — test.mosquitto.org confirmed)
+  [✅] MQTT publishes retained status/network/identity on connect (Mar 2026)
+  [✅] MQTT subscribes to command/# wildcard (Mar 2026)
+  [ ] MQTT continues over WiFi during Ethernet failover
+  [✅] WS2812B LED: red (no net) → amber (net/no MQTT) → green (MQTT ready) (Mar 2026)
+  [✅] NVS config load: phone_mode, MQTT broker, base topic, device ID (Mar 2026)
+  [✅] WebUI serves provisioning page — confirmed http accessible (Mar 2026)
+  [✅] mDNS: phone-prop-01.local resolves on LAN (Mar 2026)
+  [✅] Task WDT: armed at 30s after full init (Mar 2026)
   [ ] OTA firmware update completes successfully
+
+Notable milestones (Mar 2026):
+  - Boot loop fixed: esp_timer.h include missing; network_manager_init() was TODO
+  - answer_delay_ms NVS field added (default 1500ms, WebUI configurable)
+  - STATE_RING_AND_PLAY and STATE_ANSWER_DELAY added to state machine
+  - command/queue_audio MQTT topic implemented (arms file for auto-play on answer)
+  - SPIFFS mounts on boot; dial_rules.json missing is handled gracefully
 
 ### Phase 1B — SD Card Audio Pipeline
 Requires: External microSD breakout module wired to free header GPIOs.
@@ -134,10 +148,10 @@ and verify the pipeline is working before the SLIC arrives.
 ### Phase 2 — ProSLIC Bringup (WiFi only, no Ethernet)
 Requires: SLIC daughterboard prototype or breadboard SLIC circuit.
 Requires: ProSLIC GPIO remap verified and updated (see table above).
-Build: `pio run -e waveshare-proslic-only` (create this env, see below)
+Build: `pio run -e waveshare-proslic-only` (env exists in platformio.ini — verify GPIOs before use)
 
 Checklist:
-  [ ] ProSLIC GPIO remap finalized and added to platformio.ini
+  [ ] ProSLIC GPIO remap verified on physical header before powering up
   [ ] proslic_verify_spi() returns true (0x5A echo test passes)
   [ ] ProSLIC calibration completes (Si3217x_Cal() returns RC_NONE)
   [ ] Linefeed set to Forward Active — 48V present on TIP/RING
@@ -156,53 +170,17 @@ Flash the `phone-prop` environment. All GPIO conflicts resolved by design.
 
 ---
 
-## Creating the Phase 2 Environment
+## Phase 2 Environment
 
-Add this to platformio.ini after Phase 2 GPIO remap is confirmed:
+**Already created** — `[env:waveshare-proslic-only]` exists in platformio.ini.
 
-```ini
-[env:waveshare-proslic-only]
-platform = espressif32
-board = esp32-s3-devkitc-1
-framework = espidf
-board_build.flash_size = 16MB
-board_build.partitions = partitions.csv
-monitor_speed = 115200
-upload_speed = 921600
+Before using it:
+- Verify GPIO 39–42 are physically broken out on the Waveshare header
+- Confirm GPIO 45 boot behavior (strapping pin — check ESP32-S3 datasheet)
+- Update the SLIC GPIO defines in platformio.ini if remap changes
 
-build_flags =
-    -DCORE_DEBUG_LEVEL=3
-    -DBOARD_HAS_PSRAM=1
-    -DDEV_BOARD_WAVESHARE_ETH=1
-    -DPHASE2_PROSLIC_ONLY=1          ; Disables W5500 init in network_manager.c
-    -DMQTT_BROKER_DEFAULT="mqtt://192.168.1.100"
-    -DMQTT_TOPIC_BASE="escape/phone"
-
-    ; I2S unchanged
-    -DI2S_PCLK=4
-    -DI2S_FSYNC=5
-    -DI2S_DRX=6
-    -DI2S_DTX=7
-
-    ; ProSLIC remapped — UPDATE THESE once free GPIOs confirmed
-    -DSPI_SLIC_CLK=39
-    -DSPI_SLIC_MOSI=40
-    -DSPI_SLIC_MISO=41
-    -DSPI_SLIC_CS=42
-    -DSLIC_RST_GPIO=45
-    -DSLIC_INT_GPIO=8
-
-    ; SD card on Adafruit ADA254 breakout — GPIO 35-38 confirmed
-    -DSPI_SD_CLK=35
-    -DSPI_SD_MOSI=36
-    -DSPI_SD_MISO=37
-    -DSPI_SD_CS=38
-
-    -DLED_GPIO=21
-```
-
-Add `#ifdef PHASE2_PROSLIC_ONLY` guards in `network_manager.c` to skip W5500
-initialization when this flag is set, using WiFi only for MQTT connectivity.
+`PHASE2_PROSLIC_ONLY=1` build flag gates W5500 init in network_manager.c,
+falling back to WiFi-only MQTT. No source changes needed.
 
 ---
 
