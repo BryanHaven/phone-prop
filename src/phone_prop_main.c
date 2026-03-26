@@ -95,6 +95,7 @@ static char topic_cmd_ring[128];
 static char topic_cmd_play[128];
 static char topic_cmd_hangup[128];
 static char topic_cmd_reset[128];
+static char topic_cmd_queue_audio[128];
 static char topic_cmd_wildcard[132]; // base/command/# — slightly longer than others
 static char topic_identity[128];     // base/identity  — retained device info
 
@@ -108,6 +109,7 @@ static void build_mqtt_topics(const char *base) {
     snprintf(topic_cmd_play,     sizeof(topic_cmd_play),     "%s/command/play",   base);
     snprintf(topic_cmd_hangup,   sizeof(topic_cmd_hangup),   "%s/command/hangup", base);
     snprintf(topic_cmd_reset,    sizeof(topic_cmd_reset),    "%s/command/reset",  base);
+    snprintf(topic_cmd_queue_audio, sizeof(topic_cmd_queue_audio), "%s/command/queue_audio", base);
     snprintf(topic_cmd_wildcard, sizeof(topic_cmd_wildcard), "%s/command/#",      base);
     snprintf(topic_identity,     sizeof(topic_identity),     "%s/identity",       base);
 }
@@ -120,7 +122,9 @@ typedef enum {
     STATE_NUMBER_COMPLETE,  // Full number dialed, awaiting MMM command
     STATE_PLAYING_AUDIO,    // Playing message through handset
     STATE_BUSY,             // Playing busy signal
-    STATE_RINGING,          // Ringing the phone (inbound)
+    STATE_RINGING,          // Ringing the phone (inbound ring-only)
+    STATE_RING_AND_PLAY,    // Ringing with queued audio — plays on answer after delay
+    STATE_ANSWER_DELAY,     // Handset lifted, waiting answer_delay_ms before audio
     STATE_FAULT             // Error state
 } phone_state_t;
 
@@ -145,6 +149,10 @@ static int64_t last_pulse_time = 0;
 // Input source tracking (for diagnostics / MQTT)
 typedef enum { INPUT_UNKNOWN, INPUT_ROTARY, INPUT_DTMF } input_source_t;
 static input_source_t last_input_source = INPUT_UNKNOWN;
+
+// Ring-and-play queue — set by command/queue_audio, consumed on answer
+static char queued_audio_file[64] = {0};
+static esp_timer_handle_t answer_delay_timer = NULL;
 
 // ─── I2S PCM Handles ───────────────────────────────────────────────────────
 static i2s_chan_handle_t i2s_tx_handle = NULL;
@@ -202,6 +210,16 @@ static void set_state(phone_state_t new_state) {
             mqtt_publish(topic_event, "ring_start");
             // TODO: proslic_start_ring();
             // TODO: led_set_color(AMBER_BLINK);
+            break;
+
+        case STATE_RING_AND_PLAY:
+            mqtt_publish(topic_event, "ring_start");
+            // TODO: proslic_start_ring();
+            // TODO: led_set_color(AMBER_BLINK);
+            break;
+
+        case STATE_ANSWER_DELAY:
+            // TODO: led_set_color(AMBER_SLOW_BLINK);
             break;
 
         case STATE_PLAYING_AUDIO:
@@ -389,6 +407,51 @@ static void check_dtmf_number_complete(char last_digit) {
     set_state(STATE_NUMBER_COMPLETE);
 }
 
+// ─── Answer Delay Timer ────────────────────────────────────────────────────
+/**
+ * Fires answer_delay_ms after the player lifts the handset during a
+ * RING_AND_PLAY sequence. Plays the queued audio file automatically.
+ *
+ * This gives the player time to get the handset to their ear before
+ * audio begins — critical for a believable telephone experience.
+ */
+static void answer_delay_cb(void *arg) {
+    if (strlen(queued_audio_file) == 0) return;
+
+    ESP_LOGI(TAG, "Answer delay complete — playing queued audio: %s", queued_audio_file);
+    set_state(STATE_PLAYING_AUDIO);
+    // TODO: proslic_play_audio(queued_audio_file);
+    mqtt_publish(topic_event, "audio_start");
+    memset(queued_audio_file, 0, sizeof(queued_audio_file));
+}
+
+static void start_answer_delay(void) {
+    if (answer_delay_timer) {
+        esp_timer_stop(answer_delay_timer);
+        esp_timer_delete(answer_delay_timer);
+        answer_delay_timer = NULL;
+    }
+    esp_timer_create_args_t args = {
+        .callback        = answer_delay_cb,
+        .arg             = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name            = "answer_delay"
+    };
+    esp_timer_create(&args, &answer_delay_timer);
+    esp_timer_start_once(answer_delay_timer, (uint64_t)g_cfg.answer_delay_ms * 1000);
+    ESP_LOGI(TAG, "Answer delay started: %"PRIu32"ms", g_cfg.answer_delay_ms);
+    set_state(STATE_ANSWER_DELAY);
+}
+
+static void cancel_answer_delay(void) {
+    if (answer_delay_timer) {
+        esp_timer_stop(answer_delay_timer);
+        esp_timer_delete(answer_delay_timer);
+        answer_delay_timer = NULL;
+    }
+    memset(queued_audio_file, 0, sizeof(queued_audio_file));
+}
+
 // ─── Hook State Handler ────────────────────────────────────────────────────
 /**
  * Called when ProSLIC reports hook state change.
@@ -400,10 +463,19 @@ static void on_hook_change(bool off_hook) {
     if (off_hook) {
         if (phone_state == STATE_IDLE || phone_state == STATE_RINGING) {
             set_state(STATE_OFF_HOOK);
+        } else if (phone_state == STATE_RING_AND_PLAY && strlen(queued_audio_file) > 0) {
+            // Ring-and-play answered — start handset-to-ear delay
+            // TODO: proslic_stop_ring();
+            start_answer_delay();
         }
     } else {
-        // Capture ring state before set_state() overwrites it
-        bool was_ringing = (phone_state == STATE_RINGING);
+        // Handset replaced — cancel any pending sequence and return to idle
+        bool was_ringing = (phone_state == STATE_RINGING   ||
+                            phone_state == STATE_RING_AND_PLAY ||
+                            phone_state == STATE_ANSWER_DELAY);
+        cancel_answer_delay();
+        // TODO: proslic_stop_audio();
+        // TODO: proslic_stop_ring();
         set_state(STATE_IDLE);
         if (was_ringing) {
             mqtt_publish(topic_event, "ring_stop");
@@ -417,11 +489,35 @@ static void on_mqtt_command(const char *topic, const char *data) {
 
     if (strcmp(topic, topic_cmd_ring) == 0) {
         if (strcmp(data, "start") == 0 && phone_state == STATE_IDLE) {
-            set_state(STATE_RINGING);
+            // If a file is already queued, ring in ring-and-play mode
+            if (strlen(queued_audio_file) > 0) {
+                set_state(STATE_RING_AND_PLAY);
+            } else {
+                set_state(STATE_RINGING);
+            }
+            // TODO: proslic_start_ring();
         } else if (strcmp(data, "stop") == 0) {
+            cancel_answer_delay();
             // TODO: proslic_stop_ring();
             mqtt_publish(topic_event, "ring_stop");
             set_state(STATE_IDLE);
+        }
+
+    } else if (strcmp(topic, topic_cmd_queue_audio) == 0) {
+        // Arms a file to auto-play after the player answers during RING_AND_PLAY.
+        // M3 sends this alongside command/ring = "start".
+        // Strip surrounding quotes if present (M3 may send "filename.wav").
+        const char *fname = data;
+        if (fname[0] == '"') fname++;
+        size_t len = strlen(fname);
+        if (len > 0 && fname[len-1] == '"') len--;
+        len = len < sizeof(queued_audio_file) - 1 ? len : sizeof(queued_audio_file) - 1;
+        memset(queued_audio_file, 0, sizeof(queued_audio_file));
+        strncpy(queued_audio_file, fname, len);
+        ESP_LOGI(TAG, "Audio queued for answer: %s", queued_audio_file);
+        // If ring is already active, upgrade to RING_AND_PLAY
+        if (phone_state == STATE_RINGING) {
+            set_state(STATE_RING_AND_PLAY);
         }
 
     } else if (strcmp(topic, topic_cmd_play) == 0) {
@@ -433,9 +529,15 @@ static void on_mqtt_command(const char *topic, const char *data) {
         }
 
     } else if (strcmp(topic, topic_cmd_hangup) == 0) {
+        cancel_answer_delay();
+        // TODO: proslic_stop_audio();
+        // TODO: proslic_stop_ring();
         set_state(STATE_IDLE);
 
     } else if (strcmp(topic, topic_cmd_reset) == 0) {
+        cancel_answer_delay();
+        // TODO: proslic_stop_audio();
+        // TODO: proslic_stop_ring();
         set_state(STATE_IDLE);
         pulse_count       = 0;
         digit_count       = 0;

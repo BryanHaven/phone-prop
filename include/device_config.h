@@ -81,9 +81,15 @@ typedef struct {
     uint32_t    inter_digit_ms;         // Inter-digit gap timeout (default 300ms)
     uint32_t    number_complete_ms;     // Full number timeout (default 3000ms)
 
+    // Ring-and-play sequence
+    uint32_t    answer_delay_ms;        // Pause after off-hook before queued audio plays.
+                                        // Gives player time to get handset to ear.
+                                        // Range: 500–5000ms. Default: 1500ms.
+                                        // Configurable per-unit via WebUI.
+
     // DTMF options
     bool        dtmf_pass_star_hash;    // Publish * and # to MQTT (default true)
-                                        // Some MMM configs may not handle these;
+                                        // Some M3 configs may not handle these;
                                         // set false to suppress if needed
 } device_config_t;
 
@@ -94,6 +100,7 @@ typedef struct {
 #define DEFAULT_AUDIO_VOLUME        75
 #define DEFAULT_INTER_DIGIT_MS      300
 #define DEFAULT_NUMBER_COMPLETE_MS  3000
+#define DEFAULT_ANSWER_DELAY_MS     1500
 #define DEFAULT_DTMF_PASS_STAR_HASH true
 
 esp_err_t   config_load(device_config_t *cfg);

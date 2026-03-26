@@ -6,7 +6,7 @@
 A custom hardware controller for an escape room telephone prop. Connects to a real
 two-wire analog rotary telephone (POTS), emulates a complete FXS telephone line, decodes
 rotary pulse dialing, plays audio messages through the handset, and communicates with
-Mythric Mystery Master over MQTT.
+M3 (Mythric Mystery Master) over MQTT via WiFi.
 
 Connectivity: Ethernet primary (W5500) + WiFi fallback/WebUI. CONFIRMED.
 PoE: Design for both — AG9800MT footprint always present, DNP for portable. CONFIRMED.
@@ -144,18 +144,83 @@ WS2812B         — RGB LED, LCSC C114586, 5050
 
 ## MQTT Topics
 
-Publishes:
-  escape/phone/status   → "on_hook" | "off_hook"
-  escape/phone/dialed   → digit string e.g. "7"
-  escape/phone/number   → complete number e.g. "911"
-  escape/phone/event    → "ring_start" | "ring_stop" | "audio_complete"
-  escape/phone/network  → "ethernet" | "wifi" | "disconnected"
+All topics rooted at mqtt_base_topic (NVS config, default "escape/phone").
+
+Publishes (retained unless noted):
+  {base}/status    → "on_hook" | "off_hook"                    retained
+  {base}/dialed    → digit string e.g. "7"                     NOT retained
+  {base}/number    → complete number e.g. "911"                NOT retained
+  {base}/event     → "ring_start"|"ring_stop"|"audio_complete" NOT retained
+  {base}/network   → "ethernet" | "wifi" | "offline"           retained
+  {base}/identity  → JSON: device_id, ip, firmware, uptime     retained
+
+Last Will (set in broker session, retained):
+  {base}/network   → "offline"
+  Published by broker automatically on ungraceful disconnect.
 
 Subscribes:
-  escape/phone/command/ring    → "start" | "stop"
-  escape/phone/command/play    → filename e.g. "msg_clue1.wav"
-  escape/phone/command/hangup  → force on-hook
-  escape/phone/command/reset   → full state reset
+  {base}/command/ring          → "start" | "stop"
+  {base}/command/queue_audio   → filename e.g. "msg_clue1.wav"
+                                 Arms audio to auto-play after answer + delay.
+                                 Send alongside command/ring for ring-and-play sequence.
+  {base}/command/play          → filename — plays immediately (phone must be off-hook)
+  {base}/command/hangup        → force on-hook
+  {base}/command/reset         → full state reset
+
+## Ring-and-Play Sequence (primary escape room interaction)
+
+M3 sends two commands together:
+  command/ring        = "start"
+  command/queue_audio = "msg_clue1.wav"
+
+Firmware behavior:
+  1. Phone rings
+  2. Player lifts handset → ring stops → state = OFF_HOOK
+  3. Firmware waits answer_delay_ms (NVS config, default 1500ms)
+     — time for player to get handset to ear
+  4. Queued audio plays automatically
+  5. "audio_complete" published when done
+  6. Queued file cleared — subsequent off-hook events do not re-trigger
+
+answer_delay_ms is a per-unit NVS config field (WebUI configurable, 500–5000ms range).
+
+## Firmware State Machine
+
+States: IDLE, OFF_HOOK, DIALING, NUMBER_COMPLETE, PLAYING_AUDIO,
+        BUSY, RINGING, RING_AND_PLAY, ANSWER_DELAY, FAULT
+
+```
+IDLE (on-hook)
+  ├── hook lifted                 → OFF_HOOK → dial tone
+  ├── command/ring = "start"      → RINGING
+  └── command/ring + queue_audio  → RING_AND_PLAY
+
+OFF_HOOK
+  └── pulse / DTMF digit          → DIALING
+
+DIALING
+  └── number_complete timeout     → NUMBER_COMPLETE → publish number
+
+NUMBER_COMPLETE
+  ├── command/play "file.wav"     → PLAYING_AUDIO
+  └── command/play "busySignal"   → BUSY
+
+RINGING
+  ├── hook lifted                 → OFF_HOOK → dial tone
+  └── command/ring = "stop"       → IDLE
+
+RING_AND_PLAY
+  ├── hook lifted                 → ANSWER_DELAY (starts timer)
+  └── command/ring = "stop"       → IDLE (queue cleared)
+
+ANSWER_DELAY (default 1500ms)
+  └── timer fires                 → PLAYING_AUDIO (queued file)
+
+PLAYING_AUDIO
+  └── audio complete              → OFF_HOOK + publish "audio_complete"
+
+hook replaced from ANY state      → IDLE + cancel all timers/audio/ring
+```
 
 ---
 
@@ -177,7 +242,27 @@ ESP-IDF I2S driver (master, PCM short-frame)
 VSPI: ProSLIC | HSPI: W5500 + SD card
 LittleFS: WebUI assets + kit config
 OTA: ESP-IDF over WiFi or Ethernet
-ProSLIC: Skyworks ProSLIC API C library (HAL in firmware/src/proslic_hal.c)
+ProSLIC: Skyworks ProSLIC API C library (HAL in src/proslic_hal.c)
+
+## Hardening Patterns (implemented — ported from Raven controller)
+
+Task WDT:     esp_task_wdt, 30s timeout, panic on trigger
+              Armed AFTER full init (WiFi/SPIFFS/I2S complete)
+              Fed every 10ms in main task loop
+
+MQTT reconnect: 5s retry backoff (overrides 10s SDK default)
+
+Last Will:    {base}/network = "offline", retained
+              Set in MQTT session config; broker publishes on ungraceful disconnect
+
+Retained publishes on connect:
+              {base}/status  (current hook state)
+              {base}/network (current link: "ethernet" | "wifi")
+              {base}/identity (JSON: device_id, ip, firmware_version, uptime_s)
+
+Identity payload example:
+  {"device_id":"phone-prop-01","ip":"192.168.1.42",
+   "firmware":"1.0.0","uptime_s":3600}
 
 ---
 
@@ -196,7 +281,7 @@ spiffs    ~12MB  WebUI assets, kit config JSON
 
 WAV, 8kHz, 8-bit µ-Law, mono
 /audio/system/  : dial_tone, busy_signal, ringback, reorder_tone
-/audio/messages/: msg_clue1.wav, msg_clue2.wav ... (MMM-triggered via MQTT)
+/audio/messages/: msg_clue1.wav, msg_clue2.wav ... (M3-triggered via MQTT)
 
 ---
 
@@ -213,7 +298,7 @@ PoE section: 48VDC on RJ45 pins when PoE active
 
 ## Related Projects
 
-Raven Animatronic Controller: same ESP32/JLCPCB/MQTT/MMM workflow
+Raven Animatronic Controller: same ESP32/JLCPCB/MQTT/M3 workflow
 Parrot Kit: Mr. Chicken's Prop Shop (Jasper Anderson collaboration)
 escape2win: escape room business website — relevant to prop deployment context
 

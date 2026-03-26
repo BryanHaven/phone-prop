@@ -24,6 +24,7 @@ static const char *TAG = "config";
 #define KEY_AUDIO_VOL       "audio_vol"
 #define KEY_INTER_DIGIT     "inter_digit"
 #define KEY_NUM_COMPLETE    "num_complete"
+#define KEY_ANSWER_DELAY    "answer_delay"
 #define KEY_DTMF_STAR_HASH  "dtmf_star_hash"
 
 esp_err_t config_reset_to_defaults(device_config_t *cfg) {
@@ -34,6 +35,7 @@ esp_err_t config_reset_to_defaults(device_config_t *cfg) {
     cfg->audio_volume           = DEFAULT_AUDIO_VOLUME;
     cfg->inter_digit_ms         = DEFAULT_INTER_DIGIT_MS;
     cfg->number_complete_ms     = DEFAULT_NUMBER_COMPLETE_MS;
+    cfg->answer_delay_ms        = DEFAULT_ANSWER_DELAY_MS;
     cfg->dtmf_pass_star_hash    = DEFAULT_DTMF_PASS_STAR_HASH;
     strncpy(cfg->mqtt_broker,     DEFAULT_MQTT_BROKER,     CONFIG_STR_MAX - 1);
     strncpy(cfg->mqtt_base_topic, DEFAULT_MQTT_BASE_TOPIC, CONFIG_STR_MAX - 1);
@@ -90,6 +92,9 @@ esp_err_t config_load(device_config_t *cfg) {
     if (nvs_get_u32(handle, KEY_NUM_COMPLETE, &u32_val) == ESP_OK)
         cfg->number_complete_ms = u32_val;
 
+    if (nvs_get_u32(handle, KEY_ANSWER_DELAY, &u32_val) == ESP_OK)
+        cfg->answer_delay_ms = u32_val;
+
     if (nvs_get_u8(handle, KEY_DTMF_STAR_HASH, &u8_val) == ESP_OK)
         cfg->dtmf_pass_star_hash = (bool)u8_val;
 
@@ -117,6 +122,7 @@ esp_err_t config_save(const device_config_t *cfg) {
     nvs_set_u8 (handle, KEY_AUDIO_VOL,    cfg->audio_volume);
     nvs_set_u32(handle, KEY_INTER_DIGIT,  cfg->inter_digit_ms);
     nvs_set_u32(handle, KEY_NUM_COMPLETE, cfg->number_complete_ms);
+    nvs_set_u32(handle, KEY_ANSWER_DELAY, cfg->answer_delay_ms);
     nvs_set_u8 (handle, KEY_DTMF_STAR_HASH, (uint8_t)cfg->dtmf_pass_star_hash);
 
     // Only save password if non-empty (avoid overwriting with blank from WebUI)
