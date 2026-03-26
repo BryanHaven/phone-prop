@@ -29,6 +29,7 @@
 #include "web_ui.h"
 #include "led_status.h"
 #include "mdns.h"
+#include "esp_task_wdt.h"
 
 // SPI host aliases — ESP32-S3 doesn't define the legacy HSPI/VSPI names.
 // Per CLAUDE.md: VSPI (SPI2) = ProSLIC bus, HSPI (SPI3) = W5500 + SD bus.
@@ -95,6 +96,7 @@ static char topic_cmd_play[128];
 static char topic_cmd_hangup[128];
 static char topic_cmd_reset[128];
 static char topic_cmd_wildcard[132]; // base/command/# — slightly longer than others
+static char topic_identity[128];     // base/identity  — retained device info
 
 static void build_mqtt_topics(const char *base) {
     snprintf(topic_status,       sizeof(topic_status),       "%s/status",         base);
@@ -107,6 +109,7 @@ static void build_mqtt_topics(const char *base) {
     snprintf(topic_cmd_hangup,   sizeof(topic_cmd_hangup),   "%s/command/hangup", base);
     snprintf(topic_cmd_reset,    sizeof(topic_cmd_reset),    "%s/command/reset",  base);
     snprintf(topic_cmd_wildcard, sizeof(topic_cmd_wildcard), "%s/command/#",      base);
+    snprintf(topic_identity,     sizeof(topic_identity),     "%s/identity",       base);
 }
 
 // ─── Phone State Machine ───────────────────────────────────────────────────
@@ -147,11 +150,19 @@ static input_source_t last_input_source = INPUT_UNKNOWN;
 static i2s_chan_handle_t i2s_tx_handle = NULL;
 static i2s_chan_handle_t i2s_rx_handle = NULL;
 
-// ─── MQTT Publish Helper ───────────────────────────────────────────────────
+// ─── MQTT Publish Helpers ──────────────────────────────────────────────────
 static void mqtt_publish(const char *topic, const char *data) {
     if (mqtt_client == NULL) return;
     int msg_id = esp_mqtt_client_publish(mqtt_client, topic, data, 0, 1, 0);
     ESP_LOGI(TAG, "MQTT publish [%s]: %s (msg_id=%d)", topic, data, msg_id);
+}
+
+// Retained publish — broker remembers last value for new subscribers.
+// Use for persistent state (hook status, network state, identity).
+static void mqtt_publish_retained(const char *topic, const char *data) {
+    if (mqtt_client == NULL) return;
+    esp_mqtt_client_publish(mqtt_client, topic, data, 0, 1, 1);  // qos=1, retain=1
+    ESP_LOGI(TAG, "MQTT publish retained [%s]: %s", topic, data);
 }
 
 // ─── Network Status Callback ───────────────────────────────────────────────
@@ -444,11 +455,23 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
             web_ui_notify_mqtt(true);
             led_status_set_mqtt(true);
             esp_mqtt_client_subscribe(mqtt_client, topic_cmd_wildcard, 1);
-            // Announce current state on reconnect
-            mqtt_publish(topic_status, "on_hook");
-            mqtt_publish(topic_network,
+            // Retained — broker remembers these for MMM after it restarts
+            mqtt_publish_retained(topic_status, "on_hook");
+            mqtt_publish_retained(topic_network,
                 network_get_status() == NET_ETHERNET ? "ethernet" :
                 network_get_status() == NET_WIFI     ? "wifi"     : "disconnected");
+            // Identity — lets MMM detect reboots and see current IP / firmware
+            {
+                char ip[20];
+                char id_json[200];
+                network_get_ip_str(ip, sizeof(ip));
+                snprintf(id_json, sizeof(id_json),
+                    "{\"device_id\":\"%s\",\"ip\":\"%s\","
+                    "\"firmware\":\"%s %s\",\"uptime_s\":%lld}",
+                    g_cfg.device_id, ip, __DATE__, __TIME__,
+                    esp_timer_get_time() / 1000000LL);
+                mqtt_publish_retained(topic_identity, id_json);
+            }
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -541,9 +564,15 @@ static esp_err_t sd_card_init(void) {
 
 // ─── Main Application Task ─────────────────────────────────────────────────
 static void phone_prop_task(void *pvParameters) {
-    ESP_LOGI(TAG, "Phone prop task started");
+    // Subscribe this task to the task watchdog.
+    // WDT is configured (30s, panic) in app_main after full init.
+    // Feed every loop iteration — if this task starves for 30s the device reboots.
+    esp_task_wdt_add(NULL);
+    ESP_LOGI(TAG, "Phone prop task started — watchdog subscribed");
 
     while (1) {
+        esp_task_wdt_reset();  // feed WDT — must be first
+
         // Periodic checks
         check_dialing_timeout();
 
@@ -669,11 +698,41 @@ void app_main(void) {
     // ── MQTT client — started after network init; auto-reconnects if not yet up
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = g_cfg.mqtt_broker,
+        // Last Will: broker auto-publishes "offline" (retained) if we drop
+        // unexpectedly. On clean connect we immediately overwrite with real state.
+        .session.last_will = {
+            .topic   = topic_network,
+            .msg     = "offline",
+            .msg_len = 7,
+            .qos     = 1,
+            .retain  = 1,
+        },
+        // Retry every 5 s (SDK default is 10 s — too slow for live shows)
+        .network.reconnect_timeout_ms = 5000,
     };
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
                                    mqtt_event_handler, NULL);
     esp_mqtt_client_start(mqtt_client);
+
+    // ── Task watchdog — arm after all init complete so slow operations
+    //    (NVS, SPIFFS, WiFi) don't cause false trips during startup.
+    //    30s timeout: generous enough for any legitimate blocking op,
+    //    tight enough to recover from hangs before a show is impacted.
+    {
+        esp_task_wdt_config_t wdt_cfg = {
+            .timeout_ms     = 30000,
+            .idle_core_mask = 0,      // don't watch idle tasks
+            .trigger_panic  = true,   // hard reset on trip (writes crash log)
+        };
+        esp_err_t wdt_ret = esp_task_wdt_reconfigure(&wdt_cfg);
+        if (wdt_ret == ESP_OK) {
+            ESP_LOGI(TAG, "Task watchdog: 30 s timeout, panic on trip");
+        } else {
+            ESP_LOGW(TAG, "WDT reconfigure failed (%s) — SDK defaults apply",
+                     esp_err_to_name(wdt_ret));
+        }
+    }
 
     // ── Main prop task
     xTaskCreate(phone_prop_task, "phone_prop", 4096, NULL, 5, NULL);
