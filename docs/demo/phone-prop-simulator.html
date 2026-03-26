@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone Prop Controller — Interactive Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0c0a;font-family:'Share Tech Mono',monospace;color:#d0cfc0;min-height:100vh;padding:20px}
+:root{
+  --bg:#0d0f0e;--panel:#141714;--panel2:#1a1d1a;--border:#2a2e2a;
+  --amber:#d4841a;--amber2:#f0a030;--amber3:#ffd080;--amberdim:#5a3a08;
+  --green:#2a8a3a;--green2:#3ab04e;--greendim:#0d2e14;
+  --red:#c03020;--red2:#e04030;--reddim:#3a0e08;
+  --blue:#1a5a8a;--blue2:#2a8ad4;--bluedim:#0a2a4a;
+  --text:#d0cfc0;--textdim:#7a7a6a;--textbright:#f0efe0;
+  --metal:#2e322e;--metal2:#383c38;--screw:#1e221e;
+}
+.sim{max-width:920px;margin:0 auto;background:var(--bg);color:var(--text);padding:16px;border:1px solid var(--border);border-radius:6px}
+.header{text-align:center;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px}
+.header h1{font-family:'Courier Prime',monospace;font-size:14px;color:var(--amber);letter-spacing:4px;text-transform:uppercase;font-weight:700}
+.header p{font-size:10px;color:var(--textdim);letter-spacing:2px;margin-top:3px}
+.grid{display:grid;grid-template-columns:1fr 220px;gap:12px}
+.left{display:flex;flex-direction:column;gap:10px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:10px}
+.panel-label{font-size:9px;letter-spacing:3px;color:var(--amber);margin-bottom:8px;text-transform:uppercase;border-bottom:1px solid var(--border);padding-bottom:5px}
+.led{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:background 0.2s,box-shadow 0.2s;display:inline-block}
+.led.on-amber{background:var(--amber2);box-shadow:0 0 6px var(--amber)}
+.led.on-green{background:var(--green2);box-shadow:0 0 6px var(--green)}
+.led.on-red{background:var(--red2);box-shadow:0 0 6px var(--red)}
+.led.on-blue{background:var(--blue2);box-shadow:0 0 6px var(--blue)}
+.led.blink{animation:blink 0.6s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.15}}
+.state-current{font-size:11px;color:var(--amber3);font-weight:700;letter-spacing:2px;padding:4px 0 8px}
+.state-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.state-pill{display:flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--border);border-radius:2px;padding:4px 8px;font-size:9px;letter-spacing:1px}
+.phone-row{display:flex;gap:12px;align-items:flex-start}
+.hook-section{display:flex;flex-direction:column;align-items:center;gap:6px}
+.hook-btn{width:60px;height:88px;background:var(--metal);border:2px solid var(--metal2);border-radius:4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--textdim);font-size:9px;letter-spacing:1px;transition:all 0.15s;font-family:'Share Tech Mono',monospace}
+.hook-btn:hover{border-color:var(--amber);color:var(--amber)}
+.hook-btn.off-hook{background:var(--greendim);border-color:var(--green2);color:var(--green2)}
+.hook-btn.ringing{animation:ring-shake 0.5s infinite}
+@keyframes ring-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+.hook-icon{font-size:20px;line-height:1}
+.dial-wrap{flex:1}
+.mode-toggle{display:flex;gap:0;margin-bottom:8px}
+.mode-btn{flex:1;padding:4px;font-size:9px;letter-spacing:2px;background:var(--panel2);border:1px solid var(--border);cursor:pointer;color:var(--textdim);font-family:'Share Tech Mono',monospace;transition:all 0.15s;text-transform:uppercase}
+.mode-btn:first-child{border-radius:2px 0 0 2px}
+.mode-btn:last-child{border-radius:0 2px 2px 0}
+.mode-btn.active{background:var(--amberdim);border-color:var(--amber);color:var(--amber3)}
+.rotary{position:relative;width:150px;height:150px;margin:0 auto}
+.rotary-disc{width:150px;height:150px;border-radius:50%;background:var(--metal);border:3px solid var(--metal2);position:relative;display:flex;align-items:center;justify-content:center}
+.rotary-center{width:38px;height:38px;border-radius:50%;background:var(--screw);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:7px;color:var(--textdim);letter-spacing:1px}
+.rotary-hole{position:absolute;width:22px;height:22px;border-radius:50%;background:var(--screw);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--textdim);cursor:pointer;transition:all 0.15s;font-family:'Share Tech Mono',monospace;font-weight:700;z-index:2;user-select:none}
+.rotary-hole:hover{background:var(--amberdim);border-color:var(--amber);color:var(--amber3)}
+.rotary-hole.dialing{animation:pulse-hole 0.35s}
+@keyframes pulse-hole{0%{background:var(--amber2);color:#000}100%{background:var(--amberdim);color:var(--amber3)}}
+.dtmf-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;width:150px;margin:0 auto}
+.dtmf-btn{padding:9px 0;background:var(--metal);border:1px solid var(--metal2);border-radius:2px;font-size:11px;font-weight:700;color:var(--textdim);cursor:pointer;font-family:'Share Tech Mono',monospace;transition:all 0.15s;text-align:center}
+.dtmf-btn:hover{background:var(--amberdim);border-color:var(--amber);color:var(--amber3)}
+.dtmf-btn.pressed{animation:dtmf-press 0.2s}
+@keyframes dtmf-press{0%{background:var(--amber2);color:#000}100%{background:var(--amberdim);color:var(--amber3)}}
+.dialed-display{margin-top:8px;padding:5px 8px;background:var(--screw);border:1px solid var(--border);border-radius:2px;min-height:26px;display:flex;align-items:center}
+.dialed-num{font-size:16px;color:var(--green2);letter-spacing:4px;font-family:'Courier Prime',monospace}
+.cursor-blink{display:inline-block;width:9px;height:16px;background:var(--green2);opacity:0.7;animation:blink 1s infinite;vertical-align:bottom;margin-left:2px}
+.mmm-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.mmm-btn{padding:5px 10px;font-size:9px;letter-spacing:2px;background:var(--panel2);border:1px solid var(--border);border-radius:2px;cursor:pointer;color:var(--textdim);font-family:'Share Tech Mono',monospace;transition:all 0.15s;text-transform:uppercase}
+.mmm-btn:hover{border-color:var(--amber);color:var(--amber)}
+.mmm-btn.danger{border-color:var(--reddim);color:var(--red)}
+.mmm-btn.danger:hover{border-color:var(--red2);background:var(--reddim)}
+.mmm-btn.blue-btn{border-color:var(--bluedim);color:var(--blue2)}
+.mmm-btn.blue-btn:hover{border-color:var(--blue2);background:var(--bluedim)}
+.ring-play-panel{background:var(--panel2);border:1px solid var(--amber);border-radius:3px;padding:8px;margin-top:6px}
+.ring-play-label{font-size:8px;color:var(--amber3);letter-spacing:2px;margin-bottom:6px;text-transform:uppercase}
+.ring-play-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.ring-play-select,.delay-sel,.play-select{background:var(--screw);border:1px solid var(--border);color:var(--text);font-size:9px;font-family:'Share Tech Mono',monospace;padding:4px 6px;border-radius:2px}
+.ring-play-select{flex:1;min-width:120px}
+.ring-play-select:focus,.delay-sel:focus,.play-select:focus{outline:none;border-color:var(--amber)}
+.sequence-progress{margin-top:6px;display:none;flex-direction:column;gap:3px}
+.seq-step{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:9px;letter-spacing:1px}
+.seq-dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;transition:all 0.3s}
+.seq-dot.active{background:var(--amber2);box-shadow:0 0 4px var(--amber);animation:blink 0.5s infinite}
+.seq-dot.done{background:var(--green2)}
+.seq-dot.waiting{background:var(--blue2);animation:blink 0.8s infinite}
+.seq-text{color:var(--textdim)}
+.seq-text.active{color:var(--amber3)}
+.seq-text.done{color:var(--green2)}
+.play-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.play-select{flex:1;min-width:100px}
+.audio-indicator{display:flex;align-items:center;gap:5px;padding:4px 7px;background:var(--greendim);border:1px solid var(--green);border-radius:2px;font-size:9px;color:var(--green2);letter-spacing:1px;transition:opacity 0.3s}
+.audio-indicator.hidden{opacity:0;pointer-events:none}
+.audio-bars{display:flex;gap:2px;align-items:flex-end;height:12px}
+.bar{width:3px;background:var(--green2);border-radius:1px;animation:bar-anim 0.4s infinite alternate}
+.bar:nth-child(2){animation-delay:0.1s}.bar:nth-child(3){animation-delay:0.2s}.bar:nth-child(4){animation-delay:0.15s}
+@keyframes bar-anim{from{height:3px}to{height:10px}}
+.log{height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.log-entry{display:flex;gap:6px;padding:2px 0;border-bottom:1px solid rgba(42,46,42,0.4);font-size:9px;align-items:flex-start}
+.log-ts{color:var(--textdim);min-width:56px;flex-shrink:0}
+.log-dir{min-width:12px;flex-shrink:0;text-align:center}
+.log-dir.pub{color:var(--green2)}.log-dir.sub{color:var(--amber2)}.log-dir.sys{color:var(--blue2)}
+.log-topic{color:var(--amber);min-width:90px;flex-shrink:0;word-break:break-all}
+.log-payload{color:var(--textbright);flex:1;word-break:break-all}
+.log-empty{color:var(--textdim);font-size:10px;padding:20px;text-align:center;letter-spacing:2px}
+.instructions{background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:10px;margin-top:12px;font-size:9px;color:var(--textdim);letter-spacing:1px;line-height:1.9}
+.instructions strong{color:var(--amber3)}
+@media(max-width:680px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="sim">
+  <div class="header">
+    <h1>Phone Prop Controller</h1>
+    <p>Interactive Simulator &nbsp;|&nbsp; Escape2Win &nbsp;|&nbsp; v1.1 &nbsp;|&nbsp; ESP32-S3 + Si32177 ProSLIC</p>
+  </div>
+
+  <div class="grid">
+    <div class="left">
+
+      <div class="panel">
+        <div class="panel-label">System State</div>
+        <div class="state-current" id="state-label">IDLE — On Hook</div>
+        <div class="state-row">
+          <div class="state-pill"><div class="led" id="led-idle"></div><span>Idle</span></div>
+          <div class="state-pill"><div class="led" id="led-offhook"></div><span>Off Hook</span></div>
+          <div class="state-pill"><div class="led" id="led-dialing"></div><span>Dialing</span></div>
+          <div class="state-pill"><div class="led" id="led-complete"></div><span>Complete</span></div>
+          <div class="state-pill"><div class="led" id="led-playing"></div><span>Playing</span></div>
+          <div class="state-pill"><div class="led" id="led-busy"></div><span>Busy</span></div>
+          <div class="state-pill"><div class="led" id="led-ringing"></div><span>Ringing</span></div>
+          <div class="state-pill"><div class="led" id="led-ring_and_play"></div><span>Ring &amp; Play</span></div>
+          <div class="state-pill"><div class="led" id="led-answer_delay"></div><span>Answering</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-label">Telephone Interface</div>
+        <div class="phone-row">
+          <div class="hook-section">
+            <div class="hook-btn" id="hook-btn" onclick="toggleHook()">
+              <div class="hook-icon" id="hook-icon">&#9990;</div>
+              <div style="font-size:8px;letter-spacing:1px" id="hook-label">ON HOOK</div>
+            </div>
+            <div style="font-size:8px;color:var(--textdim);letter-spacing:1px;text-align:center;margin-top:2px">click to<br>lift/replace</div>
+          </div>
+          <div class="dial-wrap">
+            <div class="mode-toggle">
+              <button class="mode-btn active" id="btn-rotary" onclick="setMode('rotary')">Rotary</button>
+              <button class="mode-btn" id="btn-dtmf" onclick="setMode('dtmf')">Touch-Tone</button>
+            </div>
+            <div id="rotary-dial"><div class="rotary"><div class="rotary-disc" id="rotary-disc"><div class="rotary-center">DIAL</div></div></div></div>
+            <div id="dtmf-dial" style="display:none"><div class="dtmf-grid" id="dtmf-grid"></div></div>
+            <div class="dialed-display">
+              <span class="dialed-num" id="dialed-num"></span>
+              <span class="cursor-blink" id="dial-cursor" style="display:none"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-label">M3 Show Controller (Mythric Mystery Master)</div>
+
+        <div class="ring-play-panel">
+          <div class="ring-play-label">&#9654; Ring &amp; Play — Primary Escape Room Interaction</div>
+          <div class="ring-play-row">
+            <select class="ring-play-select" id="rp-select">
+              <option value="msg_clue1">msg_clue1.wav</option>
+              <option value="msg_clue2">msg_clue2.wav</option>
+              <option value="msg_clue3">msg_clue3.wav</option>
+              <option value="msg_operator">msg_operator.wav</option>
+              <option value="ringback">ringback.wav</option>
+            </select>
+            <select class="delay-sel" id="rp-delay" title="Pause after answer before audio plays">
+              <option value="1000">1s delay</option>
+              <option value="1500" selected>1.5s delay</option>
+              <option value="2000">2s delay</option>
+              <option value="2500">2.5s delay</option>
+              <option value="3000">3s delay</option>
+            </select>
+            <button class="mmm-btn blue-btn" id="rp-btn" onclick="startRingAndPlay()">&#9654; Ring &amp; Play</button>
+          </div>
+          <div class="sequence-progress" id="seq-progress">
+            <div class="seq-step"><div class="seq-dot" id="dot-ring"></div><span class="seq-text" id="txt-ring">Phone ringing...</span></div>
+            <div class="seq-step"><div class="seq-dot" id="dot-wait"></div><span class="seq-text" id="txt-wait">Waiting for player to answer...</span></div>
+            <div class="seq-step"><div class="seq-dot" id="dot-pause"></div><span class="seq-text" id="txt-pause">Handset-to-ear pause...</span></div>
+            <div class="seq-step"><div class="seq-dot" id="dot-play"></div><span class="seq-text" id="txt-play">Playing audio...</span></div>
+          </div>
+        </div>
+
+        <div style="margin-top:8px">
+          <div style="font-size:8px;color:var(--textdim);letter-spacing:1px;margin-bottom:5px">Manual controls:</div>
+          <div class="mmm-row">
+            <button class="mmm-btn" id="ring-only-btn" onclick="toggleRingOnly()">&#9654; Ring Only</button>
+            <button class="mmm-btn" onclick="manualPlay()">&#9654; Play Audio</button>
+            <button class="mmm-btn danger" onclick="sendCommand('hangup')">Hangup</button>
+            <button class="mmm-btn danger" onclick="sendCommand('reset')">Reset</button>
+          </div>
+          <div class="play-row">
+            <select class="play-select" id="audio-select">
+              <option value="dial_tone">dial_tone.wav</option>
+              <option value="busy_signal">busy_signal.wav</option>
+              <option value="ringback">ringback.wav</option>
+              <option value="msg_clue1">msg_clue1.wav</option>
+              <option value="msg_clue2">msg_clue2.wav</option>
+              <option value="reorder_tone">reorder_tone.wav</option>
+            </select>
+            <div class="audio-indicator hidden" id="audio-ind">
+              <div class="audio-bars"><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>
+              <span id="audio-name">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="panel" style="flex:1">
+        <div class="panel-label">MQTT Event Log</div>
+        <div class="log" id="log"><div class="log-empty">Waiting for events...</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-label">Network</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;align-items:center;gap:8px"><div class="led on-green"></div><span style="font-size:9px;letter-spacing:1px">Ethernet</span><span style="font-size:8px;color:var(--textdim);margin-left:auto">192.168.1.42</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><div class="led"></div><span style="font-size:9px;color:var(--textdim);letter-spacing:1px">WiFi (standby)</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><div class="led on-green"></div><span style="font-size:9px;letter-spacing:1px">MQTT broker</span></div>
+          <div style="font-size:8px;color:var(--textdim);margin-top:3px;letter-spacing:1px">topic: <span style="color:var(--amber)">escape/phone</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-label">Identity</div>
+        <div style="font-size:8px;color:var(--textdim);line-height:1.9;letter-spacing:1px">
+          <div>ID: <span style="color:var(--text)">phone-prop-01</span></div>
+          <div>FW: <span style="color:var(--text)">v1.0.0</span></div>
+          <div>MODE: <span style="color:var(--amber)" id="mode-display">ROTARY/AUTO</span></div>
+          <div>WDT: <span style="color:var(--green2)">armed 30s</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <strong>Demo flow — Ring &amp; Play (primary interaction):</strong>
+    Select an audio file → set handset-to-ear delay → click Ring &amp; Play → click the handset icon to answer → audio plays automatically after the delay.<br>
+    <strong>Manual dialing:</strong> Lift handset → dial digits on the rotary or switch to touch-tone → number publishes after 3s silence. Toggle to Touch-Tone for *, # support.<br>
+    <strong>MQTT log</strong> shows ↑ publishes from prop and ↓ commands from M3 in real time. ~ = escape/phone base topic.
+  </div>
+</div>
+
+<script>
+const BASE='escape/phone';
+const STATES=['idle','offhook','dialing','complete','playing','busy','ringing','ring_and_play','answer_delay'];
+let state='idle',offHook=false,dialMode='rotary';
+let dialedNum='',ringing=false,ringOnlyActive=false,audioPlaying=false;
+let audioTimer=null,digitTimer=null;
+let rpSequenceActive=false,rpQueuedFile=null,rpPauseTimer=null;
+
+const stateLabels={
+  idle:'IDLE — On Hook',offhook:'OFF HOOK — Dial tone',dialing:'DIALING...',
+  complete:'NUMBER COMPLETE',playing:'PLAYING AUDIO',busy:'BUSY SIGNAL',
+  ringing:'RINGING — Inbound',ring_and_play:'RING & PLAY — Awaiting answer',
+  answer_delay:'ANSWERING — Handset to ear...'
+};
+const stateLed={
+  idle:'amber',offhook:'green',dialing:'amber',complete:'green',
+  playing:'green',busy:'amber',ringing:'amber',ring_and_play:'amber',answer_delay:'blue'
+};
+
+function ts(){const n=new Date();return n.getHours().toString().padStart(2,'0')+':'+n.getMinutes().toString().padStart(2,'0')+':'+n.getSeconds().toString().padStart(2,'0');}
+
+function logEvent(dir,topic,payload){
+  const log=document.getElementById('log');
+  const empty=log.querySelector('.log-empty');
+  if(empty)empty.remove();
+  const e=document.createElement('div');
+  e.className='log-entry';
+  const cls=dir==='PUB'?'pub':dir==='SUB'?'sub':'sys';
+  const arrow=dir==='PUB'?'↑':dir==='SUB'?'↓':'·';
+  e.innerHTML=`<span class="log-ts">${ts()}</span><span class="log-dir ${cls}">${arrow}</span><span class="log-topic">${topic.replace(BASE,'~')}</span><span class="log-payload">${payload}</span>`;
+  log.appendChild(e);log.scrollTop=log.scrollHeight;
+  if(log.children.length>120)log.removeChild(log.children[0]);
+}
+function publish(sub,payload){logEvent('PUB',BASE+'/'+sub,payload);}
+function subscribe(sub,payload){logEvent('SUB',BASE+'/'+sub,payload);}
+function syslog(topic,msg){logEvent('SYS',topic,msg);}
+
+function setState(s){
+  state=s;
+  STATES.forEach(id=>{const el=document.getElementById('led-'+id);if(el)el.className='led';});
+  const led=document.getElementById('led-'+s);
+  if(led){const c=stateLed[s]||'amber';led.className='led on-'+c+(s==='ringing'||s==='ring_and_play'?' blink':'');}
+  document.getElementById('state-label').textContent=stateLabels[s]||s.toUpperCase();
+}
+
+function seqDot(id,status){
+  const d=document.getElementById('dot-'+id),t=document.getElementById('txt-'+id);
+  if(!d)return;
+  d.className='seq-dot'+(status==='active'?' active':status==='done'?' done':status==='waiting'?' waiting':'');
+  if(t)t.className='seq-text'+(status==='active'?' active':status==='done'?' done':'');
+}
+function showSeq(show){document.getElementById('seq-progress').style.display=show?'flex':'';}
+function resetSeqDots(){['ring','wait','pause','play'].forEach(id=>seqDot(id,''));}
+
+function toggleHook(){
+  if((ringing||ringOnlyActive)&&rpSequenceActive&&rpQueuedFile){handleRPAnswer();return;}
+  if(ringing||ringOnlyActive){stopRinging();}
+  offHook=!offHook;
+  const btn=document.getElementById('hook-btn');
+  const icon=document.getElementById('hook-icon');
+  if(offHook){
+    btn.classList.add('off-hook');btn.classList.remove('ringing');
+    icon.textContent='☎';document.getElementById('hook-label').textContent='OFF HOOK';
+    dialedNum='';updateDialDisplay();
+    document.getElementById('dial-cursor').style.display='inline-block';
+    publish('status','off_hook');setState('offhook');stopAudio();
+  } else {
+    btn.classList.remove('off-hook');
+    icon.innerHTML='&#9990;';document.getElementById('hook-label').textContent='ON HOOK';
+    dialedNum='';updateDialDisplay();
+    document.getElementById('dial-cursor').style.display='none';
+    publish('status','on_hook');setState('idle');stopAudio();
+    if(digitTimer){clearTimeout(digitTimer);digitTimer=null;}
+    if(rpSequenceActive)cancelRingPlay('Handset replaced — sequence cancelled');
+  }
+}
+
+function handleRPAnswer(){
+  const file=rpQueuedFile;
+  const delay=parseInt(document.getElementById('rp-delay').value);
+  rpQueuedFile=null;offHook=true;
+  const btn=document.getElementById('hook-btn');
+  btn.classList.add('off-hook');btn.classList.remove('ringing');
+  document.getElementById('hook-icon').textContent='☎';
+  document.getElementById('hook-label').textContent='OFF HOOK';
+  stopRinging();dialedNum='';updateDialDisplay();
+  document.getElementById('dial-cursor').style.display='inline-block';
+  publish('status','off_hook');setState('answer_delay');
+  seqDot('ring','done');seqDot('wait','done');seqDot('pause','active');
+  document.getElementById('txt-pause').textContent='Handset-to-ear pause ('+Math.round(delay/100)/10+'s)...';
+  syslog('~','answered — waiting '+Math.round(delay/100)/10+'s');
+  rpPauseTimer=setTimeout(()=>{
+    seqDot('pause','done');seqDot('play','active');
+    playAudioFile(file);
+    rpSequenceActive=false;
+    document.getElementById('rp-btn').textContent='▶ Ring & Play';
+    document.getElementById('rp-btn').className='mmm-btn blue-btn';
+  },delay);
+}
+
+function startRingAndPlay(){
+  if(rpSequenceActive){cancelRingPlay('Cancelled');return;}
+  if(offHook){syslog('~','phone is off-hook — hang up first');return;}
+  const file=document.getElementById('rp-select').value+'.wav';
+  rpSequenceActive=true;rpQueuedFile=document.getElementById('rp-select').value;
+  subscribe('command/ring','start');
+  subscribe('command/queue_audio','"'+file+'"');
+  showSeq(true);resetSeqDots();
+  seqDot('ring','active');
+  document.getElementById('txt-ring').textContent='Phone ringing...';
+  document.getElementById('txt-wait').textContent='Waiting for player to answer...';
+  document.getElementById('txt-pause').textContent='Handset-to-ear pause...';
+  document.getElementById('txt-play').textContent='Playing: '+file;
+  ringing=true;setState('ring_and_play');
+  document.getElementById('hook-btn').classList.add('ringing');
+  document.getElementById('rp-btn').textContent='◼ Cancel';
+  document.getElementById('rp-btn').className='mmm-btn danger';
+  publish('event','ring_start');
+  setTimeout(()=>{if(rpSequenceActive)seqDot('wait','active');},200);
+}
+
+function cancelRingPlay(reason){
+  rpSequenceActive=false;rpQueuedFile=null;
+  if(rpPauseTimer){clearTimeout(rpPauseTimer);rpPauseTimer=null;}
+  stopRinging();showSeq(false);resetSeqDots();
+  document.getElementById('rp-btn').textContent='▶ Ring & Play';
+  document.getElementById('rp-btn').className='mmm-btn blue-btn';
+  if(reason)syslog('~',reason);
+}
+
+function toggleRingOnly(){
+  if(ringOnlyActive){stopRinging();}
+  else{
+    if(offHook)return;
+    ringOnlyActive=true;ringing=true;
+    subscribe('command/ring','start');setState('ringing');
+    document.getElementById('hook-btn').classList.add('ringing');
+    document.getElementById('ring-only-btn').textContent='◼ Stop Ring';
+    document.getElementById('ring-only-btn').style.borderColor='var(--amber)';
+    document.getElementById('ring-only-btn').style.color='var(--amber3)';
+    publish('event','ring_start');
+  }
+}
+
+function stopRinging(){
+  ringing=false;ringOnlyActive=false;
+  document.getElementById('hook-btn').classList.remove('ringing');
+  document.getElementById('ring-only-btn').textContent='▶ Ring Only';
+  document.getElementById('ring-only-btn').style.borderColor='';
+  document.getElementById('ring-only-btn').style.color='';
+  if(state==='ringing'||state==='ring_and_play')setState(offHook?'offhook':'idle');
+  publish('event','ring_stop');
+}
+
+function updateDialDisplay(){document.getElementById('dialed-num').textContent=dialedNum;}
+
+function dialDigit(d){
+  if(!offHook){alert('Lift the handset first');return;}
+  if(rpSequenceActive)return;
+  dialedNum+=d;updateDialDisplay();
+  publish('dialed','"'+d+'"');setState('dialing');
+  if(digitTimer)clearTimeout(digitTimer);
+  digitTimer=setTimeout(()=>{
+    if(state==='dialing'&&dialedNum.length>0){
+      publish('number','"'+dialedNum+'"');setState('complete');
+      document.getElementById('dial-cursor').style.display='none';
+    }
+  },3000);
+}
+
+function manualPlay(){
+  const sel=document.getElementById('audio-select');
+  subscribe('command/play','"'+sel.value+'.wav"');
+  if(!offHook){syslog('~','phone is on-hook — lift handset first');return;}
+  playAudioFile(sel.value);
+}
+
+function playAudioFile(name){
+  stopAudio();audioPlaying=true;setState('playing');
+  const ind=document.getElementById('audio-ind');
+  ind.classList.remove('hidden');document.getElementById('audio-name').textContent=name;
+  const dur=name.startsWith('msg_')?5000:3000;
+  audioTimer=setTimeout(()=>{stopAudio();publish('event','audio_complete');if(offHook)setState('offhook');},dur);
+}
+
+function stopAudio(){
+  audioPlaying=false;
+  document.getElementById('audio-ind').classList.add('hidden');
+  if(audioTimer){clearTimeout(audioTimer);audioTimer=null;}
+}
+
+function sendCommand(cmd){
+  subscribe('command/'+cmd,'""');
+  if(cmd==='hangup'){if(offHook)toggleHook();stopAudio();}
+  else if(cmd==='reset'){
+    if(rpSequenceActive)cancelRingPlay('Reset by M3');
+    if(offHook)toggleHook();
+    stopAudio();stopRinging();dialedNum='';updateDialDisplay();setState('idle');
+    document.getElementById('dial-cursor').style.display='none';
+  }
+}
+
+function setMode(m){
+  dialMode=m;
+  document.getElementById('btn-rotary').className='mode-btn'+(m==='rotary'?' active':'');
+  document.getElementById('btn-dtmf').className='mode-btn'+(m==='dtmf'?' active':'');
+  document.getElementById('rotary-dial').style.display=m==='rotary'?'block':'none';
+  document.getElementById('dtmf-dial').style.display=m==='dtmf'?'block':'none';
+  document.getElementById('mode-display').textContent=m==='rotary'?'ROTARY/AUTO':'DTMF/AUTO';
+}
+
+function buildRotaryDial(){
+  const disc=document.getElementById('rotary-disc');
+  const digits=[1,2,3,4,5,6,7,8,9,0];const r=54;
+  digits.forEach((d,i)=>{
+    const a=((i/10)*360-90)*(Math.PI/180);
+    const x=75+r*Math.cos(a),y=75+r*Math.sin(a);
+    const h=document.createElement('div');
+    h.className='rotary-hole';h.dataset.d=d;h.textContent=d;
+    h.style.left=(x-11)+'px';h.style.top=(y-11)+'px';
+    h.onclick=()=>{dialDigit(d);h.classList.add('dialing');setTimeout(()=>h.classList.remove('dialing'),400);};
+    disc.appendChild(h);
+  });
+}
+
+function buildDtmfGrid(){
+  const grid=document.getElementById('dtmf-grid');
+  ['1','2','3','4','5','6','7','8','9','*','0','#'].forEach(k=>{
+    const b=document.createElement('button');
+    b.className='dtmf-btn';b.dataset.d=k;b.textContent=k;
+    b.onclick=()=>{dialDigit(k);b.classList.add('pressed');setTimeout(()=>b.classList.remove('pressed'),200);};
+    grid.appendChild(b);
+  });
+}
+
+buildRotaryDial();buildDtmfGrid();setState('idle');
+setTimeout(()=>{
+  logEvent('PUB',BASE+'/network','"ethernet"');
+  logEvent('PUB',BASE+'/status','"on_hook"');
+  logEvent('PUB',BASE+'/identity','{"device_id":"phone-prop-01","ip":"192.168.1.42","firmware":"1.0.0","uptime_s":0}');
+},400);
+</script>
+</body>
+</html>
