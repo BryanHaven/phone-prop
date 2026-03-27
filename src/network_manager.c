@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_eth.h"
@@ -41,6 +42,8 @@ static char s_ip_str[16] = "\xe2\x80\x94"; // em dash — shown when no IP assig
 
 static EventGroupHandle_t net_events;
 static network_status_t   net_status = NET_DISCONNECTED;
+static esp_eth_handle_t   s_eth_handle = NULL;  // set in ethernet_init(), read in event handler
+static esp_netif_t       *s_eth_netif  = NULL;  // set in ethernet_init(), used to fix lwIP hwaddr
 
 // Callback for network status changes (set by phone_prop_main)
 static network_status_cb_t status_callback = NULL;
@@ -67,6 +70,35 @@ void network_set_status_callback(network_status_cb_t cb) {
 static void eth_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *event_data) {
     switch (event_id) {
+        case ETHERNET_EVENT_START:
+            // ESP-IDF bug workaround: esp_netif_attach() caches the MAC in lwIP's
+            // netif hwaddr before the driver task has written it to SHAR. This causes
+            // DHCP Discover to go out with a zero source MAC, which every switch and
+            // DHCP server drops. Fix: re-read the ETH MAC here (driver task is done)
+            // and push it into both SHAR and the lwIP netif hwaddr.
+            //
+            // Fallback: if esp_read_mac(ESP_MAC_ETH) fails or returns zeros (can
+            // happen on ESP32-S3 with only 2 universal eFuse MACs), derive from
+            // WiFi STA base MAC + 3.
+            if (s_eth_handle) {
+                uint8_t eth_mac[6] = {0};
+                esp_err_t err = esp_read_mac(eth_mac, ESP_MAC_ETH);
+                bool is_zero = !(eth_mac[0]|eth_mac[1]|eth_mac[2]|eth_mac[3]|eth_mac[4]|eth_mac[5]);
+                if (err != ESP_OK || is_zero) {
+                    esp_read_mac(eth_mac, ESP_MAC_WIFI_STA);
+                    eth_mac[5] += 3;  // ETH = STA base + 3
+                    ESP_LOGW(TAG, "ETH MAC derived from WiFi STA base: "
+                             "%02x:%02x:%02x:%02x:%02x:%02x",
+                             eth_mac[0], eth_mac[1], eth_mac[2],
+                             eth_mac[3], eth_mac[4], eth_mac[5]);
+                }
+                esp_eth_ioctl(s_eth_handle, ETH_CMD_S_MAC_ADDR, eth_mac);
+                if (s_eth_netif) {
+                    esp_netif_set_mac(s_eth_netif, eth_mac);
+                }
+            }
+            break;
+
         case ETHERNET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "Ethernet link up");
             xEventGroupSetBits(net_events, ETH_CONNECTED_BIT);
@@ -117,7 +149,7 @@ static void ip_event_handler(void *arg, esp_event_base_t base,
 // The W5500 driver reads spi_host_id + spi_devcfg from eth_w5500_config_t
 // and internally calls spi_bus_add_device() — do NOT add the device manually.
 static esp_err_t ethernet_init(void) {
-    ESP_LOGI(TAG, "Initializing W5500 Ethernet...");
+    ESP_LOGI(TAG, "ethernet_init() called — RST=%d INT=%d CS=%d",W5500_RST, W5500_INT, SPI_W5500_CS);
 
     // Hardware reset W5500 before driver init
     gpio_set_direction(W5500_RST, GPIO_MODE_OUTPUT);
@@ -146,7 +178,10 @@ static esp_err_t ethernet_init(void) {
 
     eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
-    phy_cfg.reset_gpio_num = W5500_RST;
+    // Do NOT let the PHY driver assert hardware reset — the W5500 is a single chip
+    // (MAC + PHY + TCP stack), so a PHY reset clears SHAR (the MAC address register)
+    // that the MAC driver already wrote. Hardware reset is done manually above.
+    phy_cfg.reset_gpio_num = -1;
 
     esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_cfg, &mac_cfg);
     esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_cfg);
@@ -156,20 +191,22 @@ static esp_err_t ethernet_init(void) {
     }
 
     esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
-    esp_eth_handle_t eth_handle = NULL;
 
-    esp_err_t ret = esp_eth_driver_install(&eth_cfg, &eth_handle);
+    esp_err_t ret = esp_eth_driver_install(&eth_cfg, &s_eth_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "W5500 driver install failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
-    esp_netif_t *eth_netif = esp_netif_new(&netif_cfg);
-    esp_eth_netif_glue_handle_t eth_glue = esp_eth_new_netif_glue(eth_handle);
-    esp_netif_attach(eth_netif, eth_glue);
+    s_eth_netif = esp_netif_new(&netif_cfg);
+    esp_eth_netif_glue_handle_t eth_glue = esp_eth_new_netif_glue(s_eth_handle);
+    // Note: netif_glue logs "00:00:00:00:00:00" here — expected.
+    // The MAC is generated and programmed into the W5500 during esp_eth_start(),
+    // which happens after attach. The zero log is not an error.
+    esp_netif_attach(s_eth_netif, eth_glue);
 
-    esp_eth_start(eth_handle);
+    esp_eth_start(s_eth_handle);
 
     ESP_LOGI(TAG, "W5500 Ethernet driver started");
     return ESP_OK;

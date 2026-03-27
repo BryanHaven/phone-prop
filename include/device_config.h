@@ -94,8 +94,8 @@ typedef struct {
 } device_config_t;
 
 // Defaults — used if NVS is empty or corrupt
-#define DEFAULT_MQTT_BROKER         "mqtt://192.168.1.100"
-#define DEFAULT_MQTT_BASE_TOPIC     "escape/phone"
+// DEFAULT_MQTT_BROKER and DEFAULT_MQTT_BASE_TOPIC are defined in device_config.c
+// (not here) so they can be blank by default — must be provisioned via WebUI.
 #define DEFAULT_DEVICE_ID           "phone-prop-01"
 #define DEFAULT_AUDIO_VOLUME        75
 #define DEFAULT_INTER_DIGIT_MS      300

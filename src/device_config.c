@@ -27,6 +27,11 @@ static const char *TAG = "config";
 #define KEY_ANSWER_DELAY    "answer_delay"
 #define KEY_DTMF_STAR_HASH  "dtmf_star_hash"
 
+// Default MQTT Broker and base topic
+#define DEFAULT_MQTT_BROKER      ""        // must be provisioned via WebUI
+#define DEFAULT_MQTT_BASE_TOPIC  "escape/phone"
+
+
 esp_err_t config_reset_to_defaults(device_config_t *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->net_mode               = NET_MODE_ETH_PREFERRED;

@@ -11,3 +11,13 @@ CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_ETH_ENABLED=y
 CONFIG_ETH_USE_SPI_ETHERNET=y
 CONFIG_ETH_SPI_ETHERNET_W5500=y
+
+# ── OTA ─────────────────────────────────────────────────────────────────────
+# Allow plain HTTP URLs for esp_https_ota() — useful during dev where the
+# firmware server is a local machine without TLS. Production: use HTTPS.
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+
+# ── Compiler optimisation ───────────────────────────────────────────────────
+# Workaround: GCC 14.2 IRA pass segfaults in esp_lcd_panel_rgb.c at -O2 (-Og).
+# -Os (optimise for size) avoids the crash and is appropriate for this target.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
