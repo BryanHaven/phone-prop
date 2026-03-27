@@ -23,11 +23,12 @@ daughterboard. Ethernet (W5500) primary, WiFi fallback. PoE or barrel jack power
 - WiFi STA fallback with automatic switchover
 - SoftAP provisioning mode on first boot (`PhoneProp-{device_id}`, open, `192.168.4.1`)
 - NVS-backed per-unit config (MQTT broker, base topic, device ID, network mode, phone mode, etc.)
-- Four-tab WebUI at `http://<ip>/`:
+- WebUI at `http://<ip>/` — always-visible status bar (network, IP, MQTT, uptime, heap; auto-refreshes every 5 s) above four tabs:
   - **Config** — all device settings, save to NVS, reboot
   - **Dial Rules** — map dialed numbers to actions (play file, tones, ignore) + optional MQTT event; saved to SPIFFS
   - **Audio Files** — upload/delete WAV files to SD card (active in Phase 1B)
-  - **Status** — live device status (network, IP, MQTT, uptime, free heap); auto-refreshes every 5 s
+  - **Firmware** — flash firmware .bin via browser upload; shows running/next partition
+- OTA firmware update — WebUI push (`POST /api/ota`, streaming write) and MQTT pull (`command/ota` = URL)
 - MQTT client with auto-reconnect
 - mDNS — device reachable as `{device_id}.local` on all interfaces
 - WS2812B status LED state machine (red blink = no network, amber blink = no MQTT, green = ready)
@@ -153,22 +154,26 @@ All topics rooted at `mqtt_base_topic` (default `escape/phone`, configurable per
 
 ### Publishes
 
-| Topic | Payload | When |
-|-------|---------|------|
-| `{base}/status` | `on_hook` \| `off_hook` | Hook state changes |
-| `{base}/dialed` | `"7"` | Each digit as dialed |
-| `{base}/number` | `"911"` | Complete number after inter-digit timeout |
-| `{base}/event` | `ring_start` \| `ring_stop` \| `audio_complete` \| custom | Events |
-| `{base}/network` | `ethernet` \| `wifi` \| `disconnected` | Network state changes |
+| Topic | Payload | Retained | When |
+|-------|---------|----------|------|
+| `{base}/status` | `on_hook` \| `off_hook` | ✅ | Hook state changes |
+| `{base}/dialed` | `"7"` | — | Each digit as dialed |
+| `{base}/number` | `"911"` | — | Complete number after inter-digit timeout |
+| `{base}/event` | `ring_start` \| `ring_stop` \| `audio_start` \| `audio_complete` \| custom | — | Events |
+| `{base}/network` | `ethernet` \| `wifi` \| `disconnected` \| `offline` (LWT) | ✅ | Network state changes |
+| `{base}/identity` | `{"device_id":…,"ip":…,"firmware":…,"uptime_s":…}` | ✅ | On MQTT connect |
+| `{base}/ota/status` | `start` \| `complete` \| `failed` \| `refused` | — | OTA progress |
 
 ### Subscribes
 
 | Topic | Payload | Action |
 |-------|---------|--------|
 | `{base}/command/ring` | `start` \| `stop` | Start/stop ring generator |
-| `{base}/command/play` | `msg_clue1.wav` | Play audio file from SD card |
+| `{base}/command/queue_audio` | `msg_clue1.wav` | Arm file for auto-play after answer delay |
+| `{base}/command/play` | `msg_clue1.wav` | Play audio file immediately (off-hook only) |
 | `{base}/command/hangup` | — | Force on-hook state |
 | `{base}/command/reset` | — | Full state machine reset |
+| `{base}/command/ota` | `http://host/firmware.bin` | Trigger HTTP pull OTA |
 
 ---
 
@@ -260,10 +265,6 @@ Flash `phone-prop` environment. All GPIO conflicts resolved by PCB design.
 No firmware changes needed — GPIO assignments are entirely in `platformio.ini` build flags.
 
 ---
-
-## Backlog
-
-- [ ] OTA firmware update via WebUI
 
 ---
 
