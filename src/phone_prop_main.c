@@ -30,6 +30,8 @@
 #include "led_status.h"
 #include "mdns.h"
 #include "esp_task_wdt.h"
+#include "esp_https_ota.h"
+#include "esp_ota_ops.h"
 
 // SPI host aliases — ESP32-S3 doesn't define the legacy HSPI/VSPI names.
 // Per CLAUDE.md: VSPI (SPI2) = ProSLIC bus, HSPI (SPI3) = W5500 + SD bus.
@@ -98,6 +100,8 @@ static char topic_cmd_reset[128];
 static char topic_cmd_queue_audio[128];
 static char topic_cmd_wildcard[132]; // base/command/# — slightly longer than others
 static char topic_identity[128];     // base/identity  — retained device info
+static char topic_cmd_ota[128];      // base/command/ota  — URL payload → HTTP pull OTA
+static char topic_ota_status[128];   // base/ota/status   — "start"|"complete"|"failed"
 
 static void build_mqtt_topics(const char *base) {
     snprintf(topic_status,       sizeof(topic_status),       "%s/status",         base);
@@ -112,6 +116,8 @@ static void build_mqtt_topics(const char *base) {
     snprintf(topic_cmd_queue_audio, sizeof(topic_cmd_queue_audio), "%s/command/queue_audio", base);
     snprintf(topic_cmd_wildcard, sizeof(topic_cmd_wildcard), "%s/command/#",      base);
     snprintf(topic_identity,     sizeof(topic_identity),     "%s/identity",       base);
+    snprintf(topic_cmd_ota,      sizeof(topic_cmd_ota),      "%s/command/ota",    base);
+    snprintf(topic_ota_status,   sizeof(topic_ota_status),   "%s/ota/status",     base);
 }
 
 // ─── Phone State Machine ───────────────────────────────────────────────────
@@ -483,6 +489,45 @@ static void on_hook_change(bool off_hook) {
     }
 }
 
+// ─── OTA Task (MQTT-triggered HTTP pull) ───────────────────────────────────
+/**
+ * Launched as a FreeRTOS task from on_mqtt_command() when command/ota arrives.
+ * pvParameters is a heap-allocated copy of the URL string — freed here.
+ *
+ * Uses esp_https_ota() which handles streaming, SHA256 validation, and
+ * partition write. CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y permits plain HTTP
+ * URLs (useful for dev; HTTPS works without that flag).
+ *
+ * Publishes {base}/ota/status: "start" → "complete" or "failed".
+ * Reboots on success — MQTT last-will fires automatically on disconnect.
+ */
+static void ota_task(void *pvParameters) {
+    char *url = (char *)pvParameters;
+    ESP_LOGI(TAG, "OTA: fetching %s", url);
+    mqtt_publish(topic_ota_status, "start");
+
+    esp_http_client_config_t http_cfg = {
+        .url         = url,
+        .timeout_ms  = 10000,
+        .keep_alive_enable = true,
+    };
+    esp_https_ota_config_t ota_cfg = { .http_config = &http_cfg };
+
+    esp_err_t ret = esp_https_ota(&ota_cfg);
+    free(url);
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "OTA complete — rebooting");
+        mqtt_publish(topic_ota_status, "complete");
+        vTaskDelay(pdMS_TO_TICKS(1000));  // let MQTT publish before disconnect
+        esp_restart();
+    } else {
+        ESP_LOGE(TAG, "OTA failed: %s", esp_err_to_name(ret));
+        mqtt_publish(topic_ota_status, "failed");
+    }
+    vTaskDelete(NULL);
+}
+
 // ─── MQTT Command Handler ──────────────────────────────────────────────────
 static void on_mqtt_command(const char *topic, const char *data) {
     ESP_LOGI(TAG, "MQTT command [%s]: %s", topic, data);
@@ -543,6 +588,23 @@ static void on_mqtt_command(const char *topic, const char *data) {
         digit_count       = 0;
         last_input_source = INPUT_UNKNOWN;
         memset(dialed_number, 0, sizeof(dialed_number));
+
+    } else if (strcmp(topic, topic_cmd_ota) == 0) {
+        if (strlen(data) == 0) return;
+        // Refuse during active show states — don't reboot mid-scene
+        if (phone_state == STATE_RINGING      ||
+            phone_state == STATE_RING_AND_PLAY ||
+            phone_state == STATE_ANSWER_DELAY  ||
+            phone_state == STATE_PLAYING_AUDIO) {
+            ESP_LOGW(TAG, "OTA refused — phone active (state=%d)", phone_state);
+            mqtt_publish(topic_ota_status, "refused");
+            return;
+        }
+        char *url = malloc(strlen(data) + 1);
+        if (!url) { ESP_LOGE(TAG, "OTA: malloc failed"); return; }
+        strcpy(url, data);
+        // Stack: esp_https_ota uses mbedTLS + HTTP client; needs generous stack
+        xTaskCreate(ota_task, "ota", 8192, url, 5, NULL);
     }
 }
 
@@ -773,6 +835,10 @@ void app_main(void) {
     }
 
     // ── ProSLIC SPI bus (VSPI, Phase 1A: init bus and verify comms if board present)
+    // On the Waveshare board the ProSLIC SPI pins (GPIO 11/12/13) are the same
+    // physical GPIOs as the W5500. Initialising SPI2 here reconfigures those GPIOs
+    // and breaks Ethernet. Skip ProSLIC entirely until Phase 2 (WiFi-only build).
+#ifndef DEV_BOARD_WAVESHARE_ETH
     ret = proslic_spi_init();
     if (ret == ESP_OK) {
         if (proslic_verify_spi()) {
@@ -784,6 +850,9 @@ void app_main(void) {
         ESP_LOGE(TAG, "ProSLIC SPI init failed: %s", esp_err_to_name(ret));
     }
     // Phase 2: proslic_reset(); then ProSLIC API init + DTMF config
+#else
+    ESP_LOGI(TAG, "Waveshare build — ProSLIC SPI skipped (Phase 2)");
+#endif
 
     // ── I2S PCM (Phase 1A: configure peripheral; BCLK timing tuned in Phase 2)
     ret = i2s_pcm_init();
@@ -798,24 +867,28 @@ void app_main(void) {
     // TODO: webui_server_init();
 
     // ── MQTT client — started after network init; auto-reconnects if not yet up
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = g_cfg.mqtt_broker,
-        // Last Will: broker auto-publishes "offline" (retained) if we drop
-        // unexpectedly. On clean connect we immediately overwrite with real state.
-        .session.last_will = {
-            .topic   = topic_network,
-            .msg     = "offline",
-            .msg_len = 7,
-            .qos     = 1,
-            .retain  = 1,
-        },
-        // Retry every 5 s (SDK default is 10 s — too slow for live shows)
-        .network.reconnect_timeout_ms = 5000,
-    };
-    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
-                                   mqtt_event_handler, NULL);
-    esp_mqtt_client_start(mqtt_client);
+    if (strlen(g_cfg.mqtt_broker) == 0) {
+        ESP_LOGW(TAG, "No MQTT broker configured — skipping MQTT init");
+    } else {
+        esp_mqtt_client_config_t mqtt_cfg = {
+            .broker.address.uri = g_cfg.mqtt_broker,
+            // Last Will: broker auto-publishes "offline" (retained) if we drop
+            // unexpectedly. On clean connect we immediately overwrite with real state.
+            .session.last_will = {
+                .topic   = topic_network,
+                .msg     = "offline",
+                .msg_len = 7,
+                .qos     = 1,
+                .retain  = 1,
+            },
+            // Retry every 5 s (SDK default is 10 s — too slow for live shows)
+            .network.reconnect_timeout_ms = 5000,
+        };
+        mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+        esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
+                                       mqtt_event_handler, NULL);
+        esp_mqtt_client_start(mqtt_client);
+    }
 
     // ── Task watchdog — arm after all init complete so slow operations
     //    (NVS, SPIFFS, WiFi) don't cause false trips during startup.

@@ -102,23 +102,23 @@ Phase 2 with Ethernet initialization disabled and ProSLIC on remapped GPIOs.
 Build: `pio run -e waveshare-s3-eth`
 No additional hardware needed beyond the Waveshare board and a Cat5e cable.
 
-**Status: Substantially complete. OTA and Ethernet-primary path still to verify.**
+**Status: Complete. Phase 1A fully verified.**
 
 Checklist:
   [✅] W5500 Ethernet driver initializes (Mar 2026 — driver starts, netif attached)
-  [ ] W5500 Ethernet gets DHCP address (cable test pending)
-  [ ] MQTT connects over Ethernet to broker
+  [✅] W5500 Ethernet gets DHCP address (Mar 2026 — 192.168.1.103)
+  [✅] MQTT connects over Ethernet to broker (Mar 2026 — confirmed)
   [✅] WiFi connects and gets DHCP (Mar 2026 — E2W, 192.168.1.100)
   [✅] MQTT connects over WiFi (Mar 2026 — test.mosquitto.org confirmed)
   [✅] MQTT publishes retained status/network/identity on connect (Mar 2026)
   [✅] MQTT subscribes to command/# wildcard (Mar 2026)
-  [ ] MQTT continues over WiFi during Ethernet failover
+  [✅] MQTT continues over WiFi during Ethernet failover (Mar 2026 — both directions)
   [✅] WS2812B LED: red (no net) → amber (net/no MQTT) → green (MQTT ready) (Mar 2026)
   [✅] NVS config load: phone_mode, MQTT broker, base topic, device ID (Mar 2026)
   [✅] WebUI serves provisioning page — confirmed http accessible (Mar 2026)
   [✅] mDNS: phone-prop-01.local resolves on LAN (Mar 2026)
   [✅] Task WDT: armed at 30s after full init (Mar 2026)
-  [ ] OTA firmware update completes successfully
+  [✅] OTA firmware update — WebUI push + MQTT pull, confirmed clean build (Mar 2026)
 
 Notable milestones (Mar 2026):
   - Boot loop fixed: esp_timer.h include missing; network_manager_init() was TODO
@@ -126,6 +126,24 @@ Notable milestones (Mar 2026):
   - STATE_RING_AND_PLAY and STATE_ANSWER_DELAY added to state machine
   - command/queue_audio MQTT topic implemented (arms file for auto-play on answer)
   - SPIFFS mounts on boot; dial_rules.json missing is handled gracefully
+  - W5500 DHCP bringup — three-part fix required (see memory/w5500_bringup_lessons.md):
+      1. phy_cfg.reset_gpio_num = -1 (PHY reset clears entire W5500 chip incl. SHAR)
+      2. ETHERNET_EVENT_START handler: push MAC into SHAR via ETH_CMD_S_MAC_ADDR
+      3. esp_netif_set_mac() in same handler to fix lwIP hwaddr (set zero at attach time)
+  - Ethernet/WiFi failover confirmed both directions (cable unplug → WiFi takes over;
+    cable plug → Ethernet reclaims primary; MQTT seamless across both transitions)
+  - GCC 14.2 IRA pass ICE (esp_lcd_panel_rgb.c at -O2) fixed via sdkconfig.defaults:
+      CONFIG_COMPILER_OPTIMIZATION_SIZE=y  (must go in sdkconfig, not build_flags)
+  - ProSLIC spi_bus_initialize() stomps W5500 GPIO 11/12/13 on Waveshare board;
+    guarded by #ifndef DEV_BOARD_WAVESHARE_ETH in phone_prop_main.c
+  - OTA implemented (Mar 2026):
+      WebUI push:  POST /api/ota (raw .bin body, streaming write, no RAM buffer)
+                   Firmware tab always-visible status box + 4-tab layout
+      MQTT pull:   {base}/command/ota = "http://host/firmware.bin"
+                   Refused during RINGING/RING_AND_PLAY/ANSWER_DELAY/PLAYING_AUDIO
+                   Publishes {base}/ota/status: start → complete|failed
+      sdkconfig:   CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y (plain HTTP for dev)
+      Dev server:  cd .pio/build/waveshare-s3-eth && python -m http.server 8000
 
 ### Phase 1B — SD Card Audio Pipeline
 Requires: External microSD breakout module wired to free header GPIOs.

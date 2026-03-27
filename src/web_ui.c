@@ -38,6 +38,7 @@
 #include "dial_rules.h"
 #include "network_manager.h"
 #include "web_ui.h"
+#include "esp_ota_ops.h"
 
 static const char *TAG     = "web_ui";
 static httpd_handle_t s_server = NULL;
@@ -79,7 +80,7 @@ static const char HTML[] =
     ".rb{background:#444;color:#eee}"
     ".del{background:#7f1d1d;color:#eee;padding:4px 8px}"
     ".add{background:#1b4332;color:#eee}"
-    "#msg-cfg,#msg-rules,#msg-audio"
+    "#msg-cfg,#msg-rules,#msg-audio,#msg-fw"
         "{padding:10px;border-radius:4px;margin-bottom:12px;display:none}"
     ".ok{background:#1b4332;border:1px solid #40916c}"
     ".er{background:#7f1d1d;border:1px solid #991b1b}"
@@ -90,11 +91,15 @@ static const char HTML[] =
     "small{color:#888;font-size:.8em}"
     "</style></head><body>"
     "<h1>Phone Prop</h1>"
+    "<div class='s' style='margin-bottom:12px'>"
+    "<h2>Device Status</h2>"
+    "<div id='sdata'><small>Loading\u2026</small></div>"
+    "</div>"
     "<div class='tabs'>"
     "<button class='tab on' onclick='showTab(0)'>Config</button>"
     "<button class='tab'    onclick='showTab(1)'>Dial Rules</button>"
     "<button class='tab'    onclick='showTab(2)'>Audio Files</button>"
-    "<button class='tab'    onclick='showTab(3)'>Status</button>"
+    "<button class='tab'    onclick='showTab(3)'>Firmware</button>"
     "</div>"
 
     // ── Config tab ───────────────────────────────────────────────────────────
@@ -197,10 +202,17 @@ static const char HTML[] =
     "</div>"
     "</div>"
 
-    // ── Status tab ───────────────────────────────────────────────────────────
-    "<div id='t3' style='display:none'>"
-    "<div class='s'><h2>Device Status</h2>"
-    "<div id='sdata'><small>Loading\u2026</small></div>"
+    // ── Firmware tab ─────────────────────────────────────────────────────────
+    "<div id='t4' style='display:none'>"
+    "<div id='msg-fw'></div>"
+    "<div class='s'><h2>Current Firmware</h2>"
+    "<div id='fwinfo'><small>Loading\u2026</small></div>"
+    "</div>"
+    "<div class='s'><h2>Upload Firmware</h2>"
+    "<small>WAV: pio run -e waveshare-s3-eth → .pio/build/waveshare-s3-eth/firmware.bin</small>"
+    "<input id='fwfile' type='file' accept='.bin' style='margin-top:8px'>"
+    "<button class='sv' onclick='uploadFirmware()' style='margin-top:4px'>"
+        "Flash &amp; Reboot</button>"
     "</div>"
     "</div>"
 
@@ -208,8 +220,7 @@ static const char HTML[] =
     "<script>"
 
     // Tab switching
-    "const TABS=['t0','t1','t2','t3'];"
-    "let s_timer=null;"
+    "const TABS=['t0','t1','t2','t4'];"
     "function showTab(n){"
       "TABS.forEach((id,i)=>{"
         "document.getElementById(id).style.display=i===n?'block':'none';"
@@ -217,10 +228,9 @@ static const char HTML[] =
       "document.querySelectorAll('.tab').forEach((b,i)=>{"
         "b.classList.toggle('on',i===n);"
       "});"
-      "if(s_timer){clearInterval(s_timer);s_timer=null;}"
       "if(n===1)loadRules();"
       "if(n===2)loadAudio();"
-      "if(n===3){loadStatus();s_timer=setInterval(loadStatus,5000);}"
+      "if(n===3)loadFirmwareInfo();"
     "}"
 
     // ── Config tab JS ────────────────────────────────────────────────────────
@@ -405,8 +415,49 @@ static const char HTML[] =
       "}catch(ex){d.textContent='Error: '+ex.message;}"
     "}"
 
-    // Init: load config on page open
+    // ── Firmware tab JS ──────────────────────────────────────────────────────
+    "async function loadFirmwareInfo(){"
+      "const d=document.getElementById('fwinfo');"
+      "try{"
+        "const r=await fetch('/api/firmware');"
+        "const s=await r.json();"
+        "const tbl=document.createElement('table');"
+        "[['Running',s.running],['Next boot',s.next],['Build',s.firmware]]"
+          ".forEach(([k,v])=>{"
+            "const tr=tbl.insertRow();"
+            "const c1=tr.insertCell();"
+            "c1.textContent=k;c1.style.color='#8ecae6';c1.style.width='40%';"
+            "tr.insertCell().textContent=v;"
+          "});"
+        "d.innerHTML='';d.appendChild(tbl);"
+      "}catch(ex){d.textContent='Error: '+ex.message;}"
+    "}"
+    "async function uploadFirmware(){"
+      "const input=document.getElementById('fwfile');"
+      "const file=input.files[0];"
+      "const m=document.getElementById('msg-fw');"
+      "if(!file){"
+        "m.textContent='Select a .bin file first.';"
+        "m.className='er';m.style.display='block';return;"
+      "}"
+      "m.textContent='Flashing '+file.name+' ('+(file.size/1024).toFixed(0)"
+        "+' KB)\u2026 do not power off.';"
+      "m.className='ok';m.style.display='block';"
+      "try{"
+        "const r=await fetch('/api/ota',{method:'POST',"
+          "headers:{'Content-Type':'application/octet-stream'},body:file});"
+        "const j=await r.json();"
+        "m.textContent=j.status==='ok'?"
+          "'Flash complete \u2014 rebooting\u2026':'Error: '+j.error;"
+        "m.className=j.status==='ok'?'ok':'er';"
+      "}catch(ex){"
+        "m.textContent='Upload failed: '+ex.message;m.className='er';"
+      "}"
+    "}"
+
+    // Init: load config and start status auto-refresh
     "loadCfg();"
+    "loadStatus();setInterval(loadStatus,5000);"
     "</script></body></html>";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -773,6 +824,90 @@ static esp_err_t handler_post_reboot(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// ─── GET /api/firmware ───────────────────────────────────────────────────────
+
+static esp_err_t handler_get_firmware(httpd_req_t *req) {
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_partition_t *next    = esp_ota_get_next_update_partition(NULL);
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "running",  running ? running->label : "unknown");
+    cJSON_AddStringToObject(root, "next",     next    ? next->label    : "none");
+    cJSON_AddStringToObject(root, "firmware", __DATE__ " " __TIME__);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, strlen(json));
+    free(json);
+    return ESP_OK;
+}
+
+// ─── POST /api/ota ───────────────────────────────────────────────────────────
+// Streams raw firmware binary from HTTP body directly into the OTA staging
+// partition — no full-image RAM buffer needed (same pattern as audio upload).
+
+static esp_err_t handler_post_ota(httpd_req_t *req) {
+    if (req->content_len == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"error\":\"Empty body\"}");
+        return ESP_OK;
+    }
+
+    const esp_partition_t *update_part = esp_ota_get_next_update_partition(NULL);
+    if (!update_part) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"error\":\"No OTA partition\"}");
+        return ESP_OK;
+    }
+
+    esp_ota_handle_t ota_handle = 0;
+    esp_err_t ret = esp_ota_begin(update_part, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
+    if (ret != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"error\":\"OTA begin failed\"}");
+        return ESP_OK;
+    }
+
+    char *chunk = malloc(4096);
+    if (!chunk) { esp_ota_abort(ota_handle); return ESP_FAIL; }
+
+    int remaining = (int)req->content_len;
+    bool ok = true;
+    while (remaining > 0 && ok) {
+        int n = httpd_req_recv(req, chunk, remaining > 4096 ? 4096 : remaining);
+        if (n <= 0) { ok = false; break; }
+        if (esp_ota_write(ota_handle, chunk, n) != ESP_OK) { ok = false; break; }
+        remaining -= n;
+    }
+    free(chunk);
+
+    if (!ok) {
+        esp_ota_abort(ota_handle);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"error\":\"Write error\"}");
+        return ESP_OK;
+    }
+
+    ret = esp_ota_end(ota_handle);
+    if (ret != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"error\":\"Validation failed\"}");
+        return ESP_OK;
+    }
+
+    ret = esp_ota_set_boot_partition(update_part);
+    if (ret != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"status\":\"error\",\"error\":\"Set boot partition failed\"}");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "OTA web upload complete (%d bytes) — rebooting", (int)req->content_len);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    xTaskCreate(reboot_task, "ota_reboot", 2048, NULL, 5, NULL);
+    return ESP_OK;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 esp_err_t web_ui_start(device_config_t *cfg, dial_ruleset_t *rules) {
@@ -780,7 +915,7 @@ esp_err_t web_ui_start(device_config_t *cfg, dial_ruleset_t *rules) {
     s_rules = rules;
 
     httpd_config_t config     = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers   = 14;
+    config.max_uri_handlers   = 16;
     config.stack_size         = 12288;
 
     if (httpd_start(&s_server, &config) != ESP_OK) {
@@ -797,8 +932,10 @@ esp_err_t web_ui_start(device_config_t *cfg, dial_ruleset_t *rules) {
         { .uri="/api/audio", .method=HTTP_GET,    .handler=handler_get_audio    },
         { .uri="/api/audio", .method=HTTP_POST,   .handler=handler_post_audio   },
         { .uri="/api/audio",  .method=HTTP_DELETE, .handler=handler_delete_audio  },
-        { .uri="/api/reboot", .method=HTTP_POST,   .handler=handler_post_reboot  },
-        { .uri="/api/status", .method=HTTP_GET,    .handler=handler_get_status   },
+        { .uri="/api/reboot",   .method=HTTP_POST,   .handler=handler_post_reboot    },
+        { .uri="/api/status",   .method=HTTP_GET,    .handler=handler_get_status     },
+        { .uri="/api/firmware", .method=HTTP_GET,    .handler=handler_get_firmware   },
+        { .uri="/api/ota",      .method=HTTP_POST,   .handler=handler_post_ota       },
     };
     for (int i = 0; i < (int)(sizeof(routes)/sizeof(routes[0])); i++)
         httpd_register_uri_handler(s_server, &routes[i]);
